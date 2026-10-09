@@ -192,13 +192,31 @@ body {
   transform-origin: top center;
 }
 
+/* D. Aesthetic Realistic Fairy Lights Twinkle & Gentle Breeze */
+@keyframes lightsTwinkle {
+  0%, 100% {
+    opacity: 0.95;
+    filter: drop-shadow(0 0 25px rgba(255, 210, 117, 0.65));
+  }
+  50% {
+    opacity: 0.84;
+    filter: drop-shadow(0 0 14px rgba(245, 130, 32, 0.45));
+  }
+}
+
+.animate-fairy-lights {
+  animation: lightsTwinkle 4.5s ease-in-out infinite, garlandSwing1 7s ease-in-out infinite;
+  transform-origin: top center;
+}
+
 /* Respect Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .animate-dancer-left,
   .animate-dancer-right,
   .animate-garland-swing-1,
   .animate-garland-swing-2,
-  .animate-lantern-swing {
+  .animate-lantern-swing,
+  .animate-fairy-lights {
     animation: none !important;
   }
 }

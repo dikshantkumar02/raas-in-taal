@@ -186,46 +186,51 @@ export default function ParallaxScenery() {
         </div>
       </div>
 
-      {/* 4. LAYER C — REALISTIC MARIGOLD GARLANDS (TOP TORAN & SIDE CASCADES) */}
+      {/* 4. LAYER C — AESTHETIC REALISTIC FESTIVE FAIRY STRING LIGHTS & EDISON BULBS */}
       <div
         className="absolute top-0 left-0 right-0 w-full pointer-events-none z-30 transition-transform duration-500 ease-out"
         style={{ transform: `translate3d(0, ${garlandOffset}px, 0)` }}
       >
-        {/* Top Photographic Marigold Festoon / Toran */}
-        <div className="w-full flex justify-between items-start overflow-hidden h-24 sm:h-32 opacity-95">
-          <div
-            className="w-full h-28 sm:h-36 bg-repeat-x bg-contain animate-garland-swing-1 drop-shadow-[0_8px_20px_rgba(245,130,32,0.4)]"
-            style={{
-              backgroundImage: 'url(/assets/marigold_garland.jpg)',
-              backgroundSize: '240px auto',
-              maskImage: 'linear-gradient(to bottom, black 70%, transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, black 70%, transparent 100%)',
-            }}
-          />
+        {/* Draped Warm Golden Fairy String Lights & Edison Bulbs */}
+        <div className="w-full flex justify-center items-start overflow-hidden h-36 sm:h-48 md:h-56 pointer-events-none">
+          <div className="relative w-full max-w-[1920px] h-full animate-fairy-lights">
+            <img
+              src="/assets/fairy_lights.jpg"
+              alt="Aesthetic Realistic Festive Fairy Lights and Edison Bulbs"
+              className="w-full h-full object-cover sm:object-contain object-top"
+              style={{
+                maskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+              }}
+            />
+            {/* Ambient Golden Light Spill along the top */}
+            <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-amber-500/15 via-orange-500/5 to-transparent pointer-events-none" />
+          </div>
         </div>
 
-        {/* Left Side Hanging Real Marigold String */}
-        <div className="absolute top-0 left-2 sm:left-6 w-12 sm:w-16 h-80 sm:h-96 animate-garland-swing-1 drop-shadow-lg">
+        {/* Delicate side accents */}
+        <div className="absolute top-0 left-3 sm:left-8 w-8 sm:w-12 h-64 sm:h-80 opacity-70 animate-garland-swing-1">
           <div
             className="w-full h-full bg-repeat-y bg-contain"
             style={{
               backgroundImage: 'url(/assets/marigold_garland.jpg)',
-              backgroundSize: 'auto 200px',
-              maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
+              backgroundSize: 'auto 180px',
+              maskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+              opacity: 0.5,
             }}
           />
         </div>
 
-        {/* Right Side Hanging Real Marigold String */}
-        <div className="absolute top-0 right-2 sm:right-6 w-12 sm:w-16 h-80 sm:h-96 animate-garland-swing-2 drop-shadow-lg">
+        <div className="absolute top-0 right-3 sm:right-8 w-8 sm:w-12 h-64 sm:h-80 opacity-70 animate-garland-swing-2">
           <div
             className="w-full h-full bg-repeat-y bg-contain"
             style={{
               backgroundImage: 'url(/assets/marigold_garland.jpg)',
-              backgroundSize: 'auto 200px',
-              maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)',
+              backgroundSize: 'auto 180px',
+              maskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, black 75%, transparent 100%)',
+              opacity: 0.5,
             }}
           />
         </div>
