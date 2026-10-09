@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import ParallaxScenery from '@/components/ParallaxScenery';
+import FloatingPetalsAndParticles from '@/components/FloatingPetalsAndParticles';
 
 export const metadata: Metadata = {
   title: 'Raas in Taal 2026 — Dandiya Night by Chaos and Chill | Jaipur',
@@ -30,10 +32,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body className="bg-festive-pattern text-raas-cream selection:bg-raas-marigold selection:text-raas-maroon-deep">
-        <Navbar />
-        <main className="min-h-screen">{children}</main>
-        <Footer />
+      <body className="bg-festive-pattern text-raas-cream selection:bg-amber-400 selection:text-[#1A0307] relative min-h-screen">
+        {/* Continuous Animated Festive Background Layers */}
+        <ParallaxScenery />
+        <FloatingPetalsAndParticles />
+
+        <div className="relative z-20 flex flex-col min-h-screen">
+          <Navbar />
+          <main className="flex-1">{children}</main>
+          <Footer />
+        </div>
       </body>
     </html>
   );

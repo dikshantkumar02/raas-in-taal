@@ -7,7 +7,7 @@ import { ShieldCheck, AlertCircle, ArrowRight, Loader2, Sparkles, CheckCircle2 }
 
 const CATEGORY_DATA: Record<
   TicketCategoryCode,
-  { name: string; price: number; perTicket: number; description: string; rule?: string }
+  { name: string; price: number; perTicket: number; description: string; rule?: string; color: string }
 > = {
   stag_girls: {
     name: 'Stag Girls',
@@ -15,6 +15,7 @@ const CATEGORY_DATA: Record<
     perTicket: 1,
     description: 'Entry for 1 female attendee.',
     rule: 'Strictly for female stags only.',
+    color: 'pink',
   },
   couple: {
     name: 'Couple',
@@ -22,6 +23,7 @@ const CATEGORY_DATA: Record<
     perTicket: 2,
     description: 'Entry pass for 1 couple (2 attendees).',
     rule: 'Valid for 1 couple (Male + Female).',
+    color: 'amber',
   },
   group: {
     name: 'Group (4 People)',
@@ -29,6 +31,7 @@ const CATEGORY_DATA: Record<
     perTicket: 4,
     description: 'Entry package for 4 people.',
     rule: 'At least 1 female attendee is strictly mandatory.',
+    color: 'purple',
   },
   family: {
     name: 'Family (4 Members)',
@@ -36,6 +39,7 @@ const CATEGORY_DATA: Record<
     perTicket: 4,
     description: 'Entry package for 4 family members.',
     rule: 'Valid for family members of all age groups.',
+    color: 'teal',
   },
 };
 
@@ -119,12 +123,12 @@ function CheckoutContent() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-20">
       <div className="text-center space-y-2 mb-8">
-        <h1 className="text-3xl sm:text-4xl font-extrabold gold-gradient-text">
+        <h1 className="text-3xl sm:text-5xl font-black gold-gradient-text uppercase font-display">
           Secure Ticket Checkout
         </h1>
-        <p className="text-xs sm:text-sm text-raas-cream/70">
+        <p className="text-xs sm:text-sm text-amber-100/70">
           Raas in Taal 2026 • Sunday, 18 Oct 2026 • Khelcity Arena, Jaipur
         </p>
       </div>
@@ -132,10 +136,13 @@ function CheckoutContent() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* Left Form (2 cols) */}
         <div className="md:col-span-2 space-y-6">
-          <form onSubmit={handleSubmit} className="p-6 sm:p-8 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 space-y-6">
+          <form
+            onSubmit={handleSubmit}
+            className="p-6 sm:p-8 rounded-3xl glass-festive-card border-2 border-amber-400/35 space-y-6"
+          >
             {/* Category Selector */}
             <div className="space-y-3">
-              <label className="block text-xs font-bold text-raas-gold uppercase tracking-wider">
+              <label className="block text-xs font-black text-amber-400 uppercase tracking-widest">
                 Select Ticket Category
               </label>
               <div className="grid grid-cols-2 gap-3">
@@ -147,17 +154,17 @@ function CheckoutContent() {
                       type="button"
                       key={code}
                       onClick={() => setCategory(code)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
                         isSelected
-                          ? 'border-raas-gold bg-raas-maroon-light shadow-md'
-                          : 'border-raas-gold/20 bg-raas-maroon-dark/60 hover:border-raas-gold/40'
+                          ? 'border-amber-400 bg-amber-500/20 shadow-[0_0_20px_rgba(245,130,32,0.3)]'
+                          : 'border-amber-400/20 bg-black/40 hover:border-amber-400/40'
                       }`}
                     >
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-raas-cream">{item.name}</span>
-                        <span className="text-xs font-bold text-raas-gold">₹{item.price}</span>
+                        <span className="text-xs font-bold text-white">{item.name}</span>
+                        <span className="text-xs font-black text-amber-300">₹{item.price}</span>
                       </div>
-                      <span className="text-[10px] text-raas-cream/60 block mt-1">
+                      <span className="text-[10px] text-amber-100/60 block mt-1">
                         {item.perTicket} {item.perTicket === 1 ? 'Attendee' : 'Attendees'}
                       </span>
                     </button>
@@ -167,10 +174,12 @@ function CheckoutContent() {
             </div>
 
             {/* Quantity */}
-            <div className="flex items-center justify-between p-4 rounded-xl bg-raas-maroon-dark/60 border border-raas-gold/20">
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-black/40 border border-amber-400/20">
               <div>
-                <span className="text-xs font-bold text-raas-cream uppercase tracking-wide block">Ticket Quantity</span>
-                <span className="text-[11px] text-raas-cream/60">
+                <span className="text-xs font-black text-white uppercase tracking-wide block">
+                  Package Quantity
+                </span>
+                <span className="text-[11px] text-amber-200/70">
                   {catInfo.perTicket * quantity} total attendee pass slots
                 </span>
               </div>
@@ -178,15 +187,15 @@ function CheckoutContent() {
                 <button
                   type="button"
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="w-8 h-8 rounded-lg bg-raas-maroon-light border border-raas-gold/30 text-raas-gold font-bold hover:bg-raas-maroon-deep"
+                  className="w-9 h-9 rounded-xl bg-[#28060F] border border-amber-400/30 text-amber-300 font-black hover:bg-black text-sm"
                 >
                   -
                 </button>
-                <span className="text-base font-bold text-raas-gold w-6 text-center">{quantity}</span>
+                <span className="text-base font-black text-amber-300 w-6 text-center">{quantity}</span>
                 <button
                   type="button"
                   onClick={() => setQuantity(Math.min(5, quantity + 1))}
-                  className="w-8 h-8 rounded-lg bg-raas-maroon-light border border-raas-gold/30 text-raas-gold font-bold hover:bg-raas-maroon-deep"
+                  className="w-9 h-9 rounded-xl bg-[#28060F] border border-amber-400/30 text-amber-300 font-black hover:bg-black text-sm"
                 >
                   +
                 </button>
@@ -195,16 +204,16 @@ function CheckoutContent() {
 
             {/* Group female confirmation checkbox */}
             {category === 'group' && (
-              <div className="p-4 rounded-xl bg-raas-maroon-dark border border-raas-marigold/40 space-y-2">
+              <div className="p-4 rounded-2xl bg-[#28060F]/90 border border-purple-500/50 space-y-2">
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={groupFemaleVerified}
                     onChange={(e) => setGroupFemaleVerified(e.target.checked)}
-                    className="mt-1 w-4 h-4 text-raas-marigold rounded focus:ring-raas-marigold"
+                    className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
                     required
                   />
-                  <span className="text-xs text-raas-cream/90 font-medium leading-relaxed">
+                  <span className="text-xs text-amber-100/90 font-medium leading-relaxed">
                     I confirm that at least one attendee in our 4-person group is female. (Mandatory organizer rule).
                   </span>
                 </label>
@@ -212,38 +221,40 @@ function CheckoutContent() {
             )}
 
             {/* Customer Details */}
-            <div className="space-y-4 pt-2 border-t border-raas-gold/20">
-              <h3 className="text-xs font-bold text-raas-gold uppercase tracking-wider">
+            <div className="space-y-4 pt-2 border-t border-amber-400/20">
+              <h3 className="text-xs font-black text-amber-400 uppercase tracking-widest">
                 Primary Contact Details
               </h3>
 
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-raas-cream/80">Full Name *</label>
+                <label className="block text-xs font-semibold text-amber-100/80">Full Name *</label>
                 <input
                   type="text"
                   required
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="e.g. Priya Sharma"
-                  className="w-full px-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream focus:outline-none focus:border-raas-gold"
+                  className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="block text-xs font-medium text-raas-cream/80">Email Address (Pass Delivery) *</label>
+                  <label className="block text-xs font-semibold text-amber-100/80">
+                    Email Address (Pass Delivery) *
+                  </label>
                   <input
                     type="email"
                     required
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
                     placeholder="priya@example.com"
-                    className="w-full px-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream focus:outline-none focus:border-raas-gold"
+                    className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-xs font-medium text-raas-cream/80">Phone Number *</label>
+                  <label className="block text-xs font-semibold text-amber-100/80">Phone Number *</label>
                   <input
                     type="tel"
                     required
@@ -251,7 +262,7 @@ function CheckoutContent() {
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="10-digit mobile number"
-                    className="w-full px-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream focus:outline-none focus:border-raas-gold"
+                    className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
               </div>
@@ -259,9 +270,9 @@ function CheckoutContent() {
 
             {/* Attendee Names */}
             {totalAttendees > 1 && (
-              <div className="space-y-3 pt-2 border-t border-raas-gold/20">
+              <div className="space-y-3 pt-2 border-t border-amber-400/20">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-raas-gold uppercase tracking-wider">
+                  <label className="text-xs font-black text-amber-400 uppercase tracking-widest">
                     Attendee Names ({totalAttendees} people)
                   </label>
                 </div>
@@ -277,7 +288,7 @@ function CheckoutContent() {
                         next[i] = e.target.value;
                         setAttendeeNames(next);
                       }}
-                      className="px-3 py-2 rounded-lg bg-raas-maroon-dark/80 border border-raas-gold/20 text-xs text-raas-cream focus:outline-none focus:border-raas-gold"
+                      className="px-3.5 py-2.5 rounded-xl bg-black/50 border border-amber-400/20 text-xs text-white focus:outline-none focus:border-amber-400"
                     />
                   ))}
                 </div>
@@ -285,7 +296,7 @@ function CheckoutContent() {
             )}
 
             {errorMessage && (
-              <div className="p-3.5 rounded-xl bg-red-950/80 border border-red-500/50 flex items-start gap-2.5 text-xs text-red-200">
+              <div className="p-3.5 rounded-xl bg-red-950/90 border border-red-500/60 flex items-start gap-2.5 text-xs text-red-200">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
@@ -294,12 +305,12 @@ function CheckoutContent() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full gold-gradient-btn py-4 rounded-xl font-extrabold text-sm shadow-xl flex items-center justify-center gap-2 group cursor-pointer disabled:opacity-50"
+              className="w-full gold-gradient-btn py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {submitting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Reserving Capacity & Initiating PhonePe...</span>
+                  <span>Reserving Capacity &amp; Connecting to PhonePe...</span>
                 </>
               ) : (
                 <>
@@ -313,51 +324,51 @@ function CheckoutContent() {
 
         {/* Right Summary Box (1 col) */}
         <div className="space-y-6">
-          <div className="p-6 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 space-y-5">
-            <h2 className="text-sm font-bold text-raas-gold uppercase tracking-wider border-b border-raas-gold/20 pb-3">
+          <div className="p-6 rounded-3xl glass-festive-card border-2 border-amber-400/35 space-y-5">
+            <h2 className="text-xs font-black text-amber-400 uppercase tracking-widest border-b border-amber-400/20 pb-3">
               Booking Summary
             </h2>
 
             <div className="space-y-3 text-xs">
               <div className="flex justify-between">
-                <span className="text-raas-cream/70">Category</span>
-                <span className="font-bold text-raas-cream">{catInfo.name}</span>
+                <span className="text-amber-100/70">Category</span>
+                <span className="font-extrabold text-white">{catInfo.name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-raas-cream/70">Package Quantity</span>
-                <span className="font-bold text-raas-cream">{quantity}</span>
+                <span className="text-amber-100/70">Package Quantity</span>
+                <span className="font-extrabold text-white">{quantity}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-raas-cream/70">Total Admitted Attendees</span>
-                <span className="font-bold text-raas-marigold">{totalAttendees} Persons</span>
+                <span className="text-amber-100/70">Total Admitted Attendees</span>
+                <span className="font-black text-amber-300">{totalAttendees} Persons</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-raas-cream/70">Price per unit</span>
-                <span className="font-bold text-raas-cream">₹{catInfo.price}</span>
+                <span className="text-amber-100/70">Price per unit</span>
+                <span className="font-bold text-white">₹{catInfo.price}</span>
               </div>
 
-              <div className="pt-3 border-t border-raas-gold/20 flex justify-between items-baseline">
-                <span className="text-sm font-bold text-raas-cream">Total Amount</span>
-                <span className="text-2xl font-extrabold text-raas-gold">₹{totalPrice}</span>
+              <div className="pt-3 border-t border-amber-400/20 flex justify-between items-baseline">
+                <span className="text-sm font-bold text-white">Total Amount</span>
+                <span className="text-3xl font-black text-amber-300">₹{totalPrice}</span>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-raas-maroon-dark border border-raas-gold/20 space-y-2 text-[11px] text-raas-cream/70">
-              <div className="flex items-center gap-1.5 font-semibold text-raas-gold">
-                <ShieldCheck className="w-4 h-4 text-raas-gold" />
+            <div className="p-3.5 rounded-2xl bg-black/40 border border-amber-400/20 space-y-2 text-[11px] text-amber-100/75">
+              <div className="flex items-center gap-1.5 font-bold text-amber-400">
+                <ShieldCheck className="w-4 h-4" />
                 <span>Zero Hidden Fees</span>
               </div>
-              <p>Strict 500-attendee limit. Temporary reservation held for 10 minutes upon checkout.</p>
+              <p>Strict 500-attendee capacity limit. Temporary reservation held for 10 minutes upon checkout.</p>
             </div>
 
-            <div className="space-y-1.5 text-[11px] text-raas-cream/60">
-              <p className="flex items-center gap-1.5">
+            <div className="space-y-2 text-[11px] text-amber-100/70">
+              <p className="flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 <span>1 QR Gate Pass per booking</span>
               </p>
-              <p className="flex items-center gap-1.5">
+              <p className="flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Instant email delivery upon payment</span>
+                <span>Instant email delivery upon verified payment</span>
               </p>
             </div>
           </div>
@@ -369,7 +380,7 @@ function CheckoutContent() {
 
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={<div className="py-20 text-center text-raas-gold">Loading checkout...</div>}>
+    <Suspense fallback={<div className="py-20 text-center text-amber-300 font-bold">Loading checkout...</div>}>
       <CheckoutContent />
     </Suspense>
   );

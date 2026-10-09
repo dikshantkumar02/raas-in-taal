@@ -3,9 +3,11 @@
 @tailwind utilities;
 
 :root {
-  --bg-maroon-dark: #1A0307;
-  --bg-maroon-mid: #2E050D;
+  --bg-maroon-dark: #0F0205;
+  --bg-maroon-mid: #1E040B;
+  --bg-maroon-card: #28060F;
   --accent-gold: #E5A93C;
+  --accent-gold-light: #FFD275;
   --accent-marigold: #F58220;
   --text-cream: #FFF9F0;
 }
@@ -18,43 +20,187 @@ body {
   overflow-x: hidden;
 }
 
-/* Festive Decorative Patterns */
+/* Base Festive Backdrop Pattern */
 .bg-festive-pattern {
-  background-color: #1A0307;
+  background-color: #0F0205;
   background-image: 
-    radial-gradient(#E5A93C 0.75px, transparent 0.75px),
-    radial-gradient(#F58220 0.75px, #1A0307 0.75px);
-  background-size: 30px 30px;
-  background-position: 0 0, 15px 15px;
-  background-opacity: 0.08;
+    radial-gradient(#E5A93C 0.65px, transparent 0.65px),
+    radial-gradient(#F58220 0.65px, #0F0205 0.65px);
+  background-size: 32px 32px;
+  background-position: 0 0, 16px 16px;
+  background-opacity: 0.05;
 }
 
-.festive-border {
+/* Glassmorphism Festive Card */
+.glass-festive-card {
+  background: rgba(30, 4, 11, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(229, 169, 60, 0.35);
-  box-shadow: 0 4px 24px -2px rgba(245, 130, 32, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
 }
 
-.festive-glow {
-  box-shadow: 0 0 30px rgba(229, 169, 60, 0.25);
+.glass-festive-card:hover {
+  border-color: rgba(255, 210, 117, 0.6);
+  box-shadow: 0 12px 40px 0 rgba(245, 130, 32, 0.25);
 }
 
+/* Grand Gold Typography */
 .gold-gradient-text {
-  background: linear-gradient(135deg, #FFF9F0 0%, #E5A93C 50%, #F58220 100%);
+  background: linear-gradient(135deg, #FFF9F0 0%, #FFD275 35%, #E5A93C 70%, #F58220 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
+/* Radiant Gold Button */
 .gold-gradient-btn {
-  background: linear-gradient(135deg, #E5A93C 0%, #F58220 100%);
+  background: linear-gradient(135deg, #FFD275 0%, #E5A93C 50%, #F58220 100%);
   color: #1A0307;
-  font-weight: 700;
-  transition: all 0.25s ease-in-out;
+  font-weight: 800;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 20px rgba(229, 169, 60, 0.4);
 }
 
 .gold-gradient-btn:hover {
-  background: linear-gradient(135deg, #F5C768 0%, #FFA347 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(245, 130, 32, 0.4);
+  background: linear-gradient(135deg, #FFF0B8 0%, #F5C768 50%, #FFA347 100%);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 30px rgba(245, 130, 32, 0.6);
+}
+
+/* TICKET CATEGORY SPECIAL COLOR ACCENTS */
+/* 1. Stag Girls - Pink Accent */
+.ticket-card-pink {
+  border: 1px solid rgba(236, 72, 153, 0.45);
+  box-shadow: 0 4px 24px -2px rgba(236, 72, 153, 0.2);
+}
+.ticket-card-pink:hover {
+  border-color: rgba(244, 114, 182, 0.85);
+  box-shadow: 0 8px 35px 2px rgba(236, 72, 153, 0.4);
+}
+
+/* 2. Couple - Gold Accent */
+.ticket-card-gold {
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 4px 24px -2px rgba(245, 158, 11, 0.2);
+}
+.ticket-card-gold:hover {
+  border-color: rgba(251, 191, 36, 0.85);
+  box-shadow: 0 8px 35px 2px rgba(245, 158, 11, 0.4);
+}
+
+/* 3. Group - Purple Accent */
+.ticket-card-purple {
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  box-shadow: 0 4px 24px -2px rgba(168, 85, 247, 0.2);
+}
+.ticket-card-purple:hover {
+  border-color: rgba(192, 132, 252, 0.85);
+  box-shadow: 0 8px 35px 2px rgba(168, 85, 247, 0.4);
+}
+
+/* 4. Family - Teal Accent */
+.ticket-card-teal {
+  border: 1px solid rgba(20, 184, 166, 0.45);
+  box-shadow: 0 4px 24px -2px rgba(20, 184, 166, 0.2);
+}
+.ticket-card-teal:hover {
+  border-color: rgba(45, 212, 191, 0.85);
+  box-shadow: 0 8px 35px 2px rgba(20, 184, 166, 0.4);
+}
+
+/* ANIMATION KEYFRAMES */
+
+/* A. Dancers Gentle Sway & Float */
+@keyframes dancerSwayLeft {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(1.8deg);
+  }
+}
+
+@keyframes dancerSwayRight {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(-1.8deg);
+  }
+}
+
+.animate-dancer-left {
+  animation: dancerSwayLeft 5.5s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-dancer-right {
+  animation: dancerSwayRight 6s ease-in-out infinite 0.5s;
+  transform-origin: bottom center;
+}
+
+/* B. Marigold Garlands Pendulum Swing */
+@keyframes garlandSwing1 {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(2deg);
+  }
+  75% {
+    transform: rotate(-2deg);
+  }
+}
+
+@keyframes garlandSwing2 {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-2.5deg);
+  }
+  75% {
+    transform: rotate(2.5deg);
+  }
+}
+
+.animate-garland-swing-1 {
+  animation: garlandSwing1 4s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.animate-garland-swing-2 {
+  animation: garlandSwing2 4.6s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* C. Lantern Swinging with Glow */
+@keyframes lanternSwing {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(2.2deg);
+  }
+  70% {
+    transform: rotate(-2.2deg);
+  }
+}
+
+.animate-lantern-swing {
+  animation: lanternSwing 5s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+/* Respect Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-dancer-left,
+  .animate-dancer-right,
+  .animate-garland-swing-1,
+  .animate-garland-swing-2,
+  .animate-lantern-swing {
+    animation: none !important;
+  }
 }
 
 /* Print Ticket Styles */
