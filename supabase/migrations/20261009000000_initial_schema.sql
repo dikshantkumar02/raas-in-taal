@@ -361,3 +361,32 @@ CREATE POLICY "Public cannot modify orders" ON orders FOR ALL USING (false);
 -- Passes and Check-ins are strictly protected; access via server API routes with verified auth
 CREATE POLICY "Service and staff only for passes" ON passes FOR ALL USING (false);
 CREATE POLICY "Service and staff only for check_ins" ON check_ins FOR ALL USING (false);
+
+-- 8. CUSTOMERS TABLE
+CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Server only for customers" ON customers FOR ALL USING (false);
+
+-- 9. STAFF ACCOUNTS TABLE
+CREATE TABLE IF NOT EXISTS staff_accounts (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    pin_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'staff',
+    gate_location TEXT NOT NULL DEFAULT 'Main Gate',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_username ON staff_accounts(username);
+ALTER TABLE staff_accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Server only for staff_accounts" ON staff_accounts FOR ALL USING (false);
+

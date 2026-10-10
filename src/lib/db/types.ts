@@ -102,3 +102,38 @@ export interface CheckInResult {
   remaining: number;
   firstCheckInTime?: Date;
 }
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  passwordHash: string;
+  createdAt: Date;
+}
+
+export interface StaffAccount {
+  id: string;
+  username: string;
+  name: string;
+  pinHash: string;
+  role: 'staff' | 'gate_supervisor';
+  gateLocation?: string;
+  isActive: boolean;
+  createdAt: Date;
+  lastLoginAt?: Date;
+}
+
+export interface StaffTicketLookupResult {
+  valid: boolean;
+  status: PassStatus;
+  bookingReference: string;
+  categoryCode: TicketCategoryCode;
+  customerName: string;
+  totalAttendees: number;
+  admittedCount: number;
+  remaining: number;
+  attendeeNames?: string[];
+  issuedAt: Date;
+}
+

@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
 import { sendTicketConfirmationEmail } from '@/lib/email/service';
+import { checkRateLimit, getClientIp } from '@/lib/security/crypto';
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rateCheck = checkRateLimit(`ticket_resend_${ip}`, 5, 60000);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many pass resend requests. Please wait 1 minute before trying again.' },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { bookingReference, email } = body;
 
@@ -40,6 +50,13 @@ export async function POST(req: NextRequest) {
       event: db.getEventConfig(),
       appBaseUrl: baseUrl,
     });
+
+    if (!emailRes.success) {
+      return NextResponse.json(
+        { error: emailRes.error || 'Email delivery failed from provider.' },
+        { status: 400 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

@@ -2,8 +2,29 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { TicketCategoryCode } from '@/lib/db/types';
-import { ShieldCheck, AlertCircle, ArrowRight, Loader2, Sparkles, CheckCircle2 } from 'lucide-react';
+import {
+  ShieldCheck,
+  AlertCircle,
+  ArrowRight,
+  Loader2,
+  Sparkles,
+  CheckCircle2,
+  Lock,
+  User,
+  Mail,
+  Phone,
+  KeyRound,
+  LogOut,
+} from 'lucide-react';
+
+interface CustomerUser {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+}
 
 const CATEGORY_DATA: Record<
   TicketCategoryCode,
@@ -59,12 +80,34 @@ function CheckoutContent() {
   const [groupFemaleVerified, setGroupFemaleVerified] = useState(false);
   const [attendeeNames, setAttendeeNames] = useState<string[]>(['']);
 
+  // Authentication State (Optional pre-fill from logged-in account)
+  const [customerUser, setCustomerUser] = useState<CustomerUser | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const catInfo = CATEGORY_DATA[category];
   const totalAttendees = catInfo.perTicket * quantity;
   const totalPrice = catInfo.price * quantity;
+
+  // Check customer session quietly in background without blocking the UI
+  const verifySession = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.customer) {
+          setCustomerUser(data.customer);
+          setCustomerName((prev) => prev || data.customer.name);
+          setCustomerEmail((prev) => prev || data.customer.email);
+          setCustomerPhone((prev) => prev || data.customer.phone);
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    verifySession();
+  }, []);
 
   // Sync attendee input fields
   useEffect(() => {
@@ -79,6 +122,24 @@ function CheckoutContent() {
     e.preventDefault();
     setErrorMessage('');
 
+    const finalName = (customerName || customerUser?.name || '').trim();
+    const finalEmail = (customerEmail || customerUser?.email || '').trim();
+    const finalPhone = (customerPhone || customerUser?.phone || '').trim();
+
+    if (!finalName) {
+      setErrorMessage('Please enter your full name.');
+      return;
+    }
+    if (!finalEmail || !finalEmail.includes('@')) {
+      setErrorMessage('Please enter a valid email address for your QR pass delivery.');
+      return;
+    }
+    const cleanPh = finalPhone.replace(/\D/g, '');
+    if (cleanPh.length < 10) {
+      setErrorMessage('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
     if (category === 'group' && !groupFemaleVerified) {
       setErrorMessage('Please confirm that at least 1 attendee in your group is female.');
       return;
@@ -90,11 +151,13 @@ function CheckoutContent() {
       const payload = {
         categoryCode: category,
         quantity,
-        customerName,
-        customerEmail,
-        customerPhone,
+        customerName: finalName,
+        customerEmail: finalEmail,
+        customerPhone: finalPhone,
         groupFemaleVerified: category === 'group' ? groupFemaleVerified : false,
-        attendeeDetails: attendeeNames.map((name) => ({ name: name.trim() || customerName })),
+        attendeeDetails: attendeeNames.map((name, idx) => ({
+          name: name.trim() || (idx === 0 ? finalName : `Attendee ${idx + 1}`),
+        })),
       };
 
       const res = await fetch('/api/orders', {
@@ -125,7 +188,7 @@ function CheckoutContent() {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-20">
       <div className="text-center space-y-2 mb-8">
-        <h1 className="text-3xl sm:text-5xl font-black gold-gradient-text uppercase font-display">
+        <h1 className="text-3xl sm:text-5xl font-black gold-gradient-text uppercase font-royal">
           Secure Ticket Checkout
         </h1>
         <p className="text-xs sm:text-sm text-amber-100/70">
@@ -220,55 +283,82 @@ function CheckoutContent() {
               </div>
             )}
 
-            {/* Customer Details */}
-            <div className="space-y-4 pt-2 border-t border-amber-400/20">
-              <h3 className="text-xs font-black text-amber-400 uppercase tracking-widest">
-                Primary Contact Details
-              </h3>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-amber-100/80">Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="e.g. Priya Sharma"
-                  className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
-                />
+            {/* Primary Customer Contact Details (Immediate, Zero Waiting) */}
+            <div className="space-y-4 pt-4 border-t border-amber-400/20">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-amber-400 uppercase tracking-widest">
+                  Primary Attendee &amp; Pass Delivery
+                </span>
+                {customerUser ? (
+                  <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Signed in as {customerUser.name}</span>
+                  </span>
+                ) : (
+                  <Link
+                    href="/account"
+                    className="text-[11px] text-amber-300/80 hover:text-amber-200 underline font-semibold"
+                  >
+                    Have an account? Sign in
+                  </Link>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-amber-100/80">
-                    Email Address (Pass Delivery) *
-                  </label>
+              <div>
+                <label className="block text-[11px] font-bold text-amber-200 uppercase mb-1">
+                  Full Name *
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-amber-400/60 absolute left-3 top-3" />
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="priya@example.com"
-                    className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-black/60 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
+              </div>
 
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-amber-100/80">Phone Number *</label>
-                  <input
-                    type="tel"
-                    required
-                    pattern="[0-9]{10}"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="10-digit mobile number"
-                    className="w-full px-4 py-3 rounded-xl bg-black/50 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-200 uppercase mb-1">
+                    Email Address (Instant QR Delivery) *
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-amber-400/60 absolute left-3 top-3" />
+                    <input
+                      type="email"
+                      required
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      placeholder="name@gmail.com"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-black/60 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-200 uppercase mb-1">
+                    Mobile Number *
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-amber-400/60 absolute left-3 top-3" />
+                    <input
+                      type="tel"
+                      required
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="10-digit mobile number"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-black/60 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Attendee Names */}
+            {/* Additional Attendee Names (if > 1 attendee) */}
             {totalAttendees > 1 && (
               <div className="space-y-3 pt-2 border-t border-amber-400/20">
                 <div className="flex items-center justify-between">
@@ -281,8 +371,8 @@ function CheckoutContent() {
                     <input
                       key={i}
                       type="text"
-                      placeholder={`Attendee ${i + 1} Name ${i === 0 ? '(Primary)' : ''}`}
-                      value={attendeeNames[i] || ''}
+                      placeholder={`Attendee ${i + 1} Name ${i === 0 ? '(Primary / You)' : ''}`}
+                      value={attendeeNames[i] || (i === 0 ? customerName : '')}
                       onChange={(e) => {
                         const next = [...attendeeNames];
                         next[i] = e.target.value;
@@ -305,7 +395,7 @@ function CheckoutContent() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full gold-gradient-btn py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full gold-gradient-btn py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:scale-[1.01] transition-transform"
             >
               {submitting ? (
                 <>
@@ -358,7 +448,7 @@ function CheckoutContent() {
                 <ShieldCheck className="w-4 h-4" />
                 <span>Zero Hidden Fees</span>
               </div>
-              <p>Strict 500-attendee capacity limit. Temporary reservation held for 10 minutes upon checkout.</p>
+              <p>Temporary reservation held for 10 minutes upon checkout.</p>
             </div>
 
             <div className="space-y-2 text-[11px] text-amber-100/70">

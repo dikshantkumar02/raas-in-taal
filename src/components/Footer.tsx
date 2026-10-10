@@ -8,18 +8,24 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-10">
           {/* Brand Col */}
           <div className="space-y-4 md:col-span-1">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-400" />
-              <span className="text-xl font-black tracking-wider gold-gradient-text uppercase font-display">
-                RAAS IN TAAL
-              </span>
+            <div className="flex items-center gap-3">
+              <img
+                src="/assets/chaos_and_chill_logo.png"
+                alt="Chaos and Chill Logo"
+                className="h-12 w-auto object-contain rounded-xl border border-amber-400/30 shadow-md"
+              />
+              <div>
+                <span className="text-xl font-black tracking-wider gold-gradient-text uppercase font-royal block">
+                  RAAS IN TAAL
+                </span>
+                <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-wide block">
+                  Chaos and Chill
+                </span>
+              </div>
             </div>
             <p className="text-xs text-amber-100/70 leading-relaxed">
               Jaipur&apos;s premier Dandiya &amp; Garba celebration featuring traditional Durga Puja rituals, energetic dhol beats, delicious food stalls, and an electrifying dance arena.
             </p>
-            <div className="text-xs text-amber-400 font-extrabold uppercase tracking-wide">
-              Presented by Chaos and Chill
-            </div>
           </div>
 
           {/* Event Details Col */}
@@ -64,12 +70,12 @@ export default function Footer() {
               <div className="flex items-center gap-2">
                 <Instagram className="w-4 h-4 text-pink-400" />
                 <a
-                  href="https://instagram.com/chaos_and_chill"
+                  href="https://instagram.com/_chaos_and_chill_"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-pink-300 transition-colors font-bold text-pink-300 underline underline-offset-2"
                 >
-                  @chaos_and_chill
+                  @_chaos_and_chill_
                 </a>
               </div>
             </div>
@@ -79,9 +85,9 @@ export default function Footer() {
           <div className="space-y-3">
             <h4 className="text-xs font-black text-amber-400 tracking-widest uppercase">Gate &amp; Capacity</h4>
             <div className="p-3.5 bg-[#19030A] rounded-2xl border border-amber-400/20 text-xs space-y-2">
-              <p className="font-bold text-amber-300">Strict 500 Attendees Limit</p>
+              <p className="font-bold text-amber-300">Controlled Arena Entry</p>
               <p className="text-amber-100/70 leading-relaxed text-[11px]">
-                To guarantee safety and a premium experience, entry is strictly restricted to 500 attendees across all categories.
+                To guarantee safety and a premium experience, entry is strictly managed across all categories.
               </p>
               <p className="text-[10px] text-amber-300/60 pt-1 border-t border-amber-400/10">
                 1 QR pass per booking with individual attendee entry tracking.

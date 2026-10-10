@@ -1,4 +1,5 @@
 import { Order, GatePass, EventConfig } from '../db/types';
+import { generateQrDataUrl } from '../qr/generator';
 
 export interface EmailDeliveryRecord {
   orderId: string;
@@ -10,8 +11,17 @@ export interface EmailDeliveryRecord {
 
 const emailDeliveryLog: Map<string, EmailDeliveryRecord> = new Map();
 
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 /**
- * Sends a confirmation email with gate pass link and event information.
+ * Sends a confirmation email with gate pass link, event information, and QR scanner code.
  * Safe & idempotent: won't crash payment flow if email fails.
  */
 export async function sendTicketConfirmationEmail(params: {
@@ -22,6 +32,13 @@ export async function sendTicketConfirmationEmail(params: {
 }): Promise<{ success: boolean; status: 'SENT' | 'FAILED' | 'MOCKED'; error?: string }> {
   const { order, pass, event, appBaseUrl } = params;
   const passUrl = `${appBaseUrl}/ticket/${encodeURIComponent(pass.qrToken)}`;
+
+  // Generate high-reliability HTTPS QR Image URL (loads in all email clients without Gmail base64 blocking)
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&color=1A0307&bgcolor=FFFFFF&data=${encodeURIComponent(pass.qrToken)}`;
+
+  const safeCustomerName = escapeHtml(order.customerName);
+  const safeOrderReference = escapeHtml(order.orderReference);
+  const safeVenue = escapeHtml(event.venue);
 
   const emailHtml = `
     <!DOCTYPE html>
@@ -46,21 +63,30 @@ export async function sendTicketConfirmationEmail(params: {
           <h1 class="title">Raas in Taal 2026</h1>
           <p class="subtitle">Organized by Chaos and Chill</p>
         </div>
-        <p>Namaste <strong>${order.customerName}</strong>,</p>
+        <p>Namaste <strong>${safeCustomerName}</strong>,</p>
         <p>Your booking for Jaipur's most vibrant Dandiya night is confirmed!</p>
         
         <div class="card">
-          <p><strong>Booking Ref:</strong> ${order.orderReference}</p>
+          <p><strong>Booking Ref:</strong> ${safeOrderReference}</p>
           <p><strong>Ticket Category:</strong> ${order.categoryCode.toUpperCase()}</p>
           <p><strong>Admitted Attendees:</strong> ${pass.totalAttendees} Person(s)</p>
           <p><strong>Date:</strong> Sunday, 18 October 2026</p>
           <p><strong>Durga Puja:</strong> 5:30 PM | <strong>Dandiya Night:</strong> 6:00 PM</p>
-          <p><strong>Venue:</strong> ${event.venue}</p>
+          <p><strong>Venue:</strong> ${safeVenue}</p>
+        </div>
+
+        <!-- Official Entry Gate QR Scanner Pass -->
+        <div style="text-align: center; margin: 24px 0; background: #1B0207; border: 2px dashed #E5A93C; border-radius: 12px; padding: 20px;">
+          <p style="color: #E5A93C; font-size: 13px; font-weight: bold; letter-spacing: 1.5px; text-transform: uppercase; margin: 0 0 12px 0;">Official Entry Gate QR Scanner Pass</p>
+          <div style="display: inline-block; background: #ffffff; padding: 12px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+            <img src="${qrImageUrl}" alt="Gate Pass QR Code" width="220" height="220" style="display: block; width: 220px; height: 220px; margin: 0 auto; border: 0;" />
+          </div>
+          <p style="color: #FFA347; font-size: 11px; margin-top: 10px; font-family: monospace;">Pass Token: ${pass.qrToken.slice(0, 18)}...</p>
+          <p style="color: #FFF9F0; font-size: 12px; margin-top: 6px;">Present this QR code directly to the gate staff for entry.</p>
         </div>
 
         <div style="text-align: center;">
-          <p>Access your official QR Gate Pass below. Present this pass at the gate for entry:</p>
-          <a href="${passUrl}" class="button">View & Download QR Gate Pass</a>
+          <a href="${passUrl}" class="button">Open & Download Mobile Pass</a>
         </div>
 
         <div style="margin-top: 24px;">
@@ -80,8 +106,57 @@ export async function sendTicketConfirmationEmail(params: {
     </html>
   `;
 
-  const apiKey = process.env.EMAIL_API_KEY;
-  const provider = process.env.EMAIL_PROVIDER || 'mock';
+  const apiKey = (process.env.EMAIL_API_KEY || '').replace(/['"]/g, '').trim();
+  const provider = (process.env.EMAIL_PROVIDER || 'mock').replace(/['"]/g, '').trim();
+  const gmailUser = (process.env.GMAIL_USER || process.env.EMAIL_FROM_ADDRESS || '').replace(/['"]/g, '').trim();
+  const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').replace(/['"]/g, '').replace(/\s+/g, '').trim();
+
+  // Gmail SMTP Provider (free, no domain needed)
+  if (provider === 'gmail' && gmailUser && gmailPass) {
+    try {
+      const nodemailer = await import('nodemailer');
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: gmailUser,
+          pass: gmailPass,
+        },
+      });
+
+      const mailOptions: any = {
+        from: `"Raas in Taal — Dandiya Night" <${gmailUser}>`,
+        to: order.customerEmail,
+        subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
+        html: emailHtml,
+      };
+
+      mailOptions.attachments = [
+        {
+          filename: `gate-pass-${order.orderReference}.png`,
+          path: qrImageUrl,
+        },
+      ];
+
+      await transporter.sendMail(mailOptions);
+
+      emailDeliveryLog.set(order.id, {
+        orderId: order.id,
+        recipientEmail: order.customerEmail,
+        sentAt: new Date(),
+        status: 'SENT',
+      });
+      return { success: true, status: 'SENT' };
+    } catch (err: any) {
+      emailDeliveryLog.set(order.id, {
+        orderId: order.id,
+        recipientEmail: order.customerEmail,
+        sentAt: new Date(),
+        status: 'FAILED',
+        error: err.message,
+      });
+      return { success: false, status: 'FAILED', error: err.message };
+    }
+  }
 
   // If in mock or development mode or no key provided, log cleanly without secret exposure
   if (provider === 'mock' || !apiKey) {
@@ -109,6 +184,7 @@ export async function sendTicketConfirmationEmail(params: {
         subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
         html: emailHtml,
       }),
+      signal: AbortSignal.timeout(10000),
     });
 
     if (res.ok) {

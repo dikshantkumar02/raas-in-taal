@@ -228,14 +228,14 @@ export default function AdminDashboardPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: 500 Capacity */}
+        {/* Card 1: Capacity */}
         <div className="p-5 rounded-2xl bg-raas-maroon-mid border border-raas-gold/30 space-y-2">
           <div className="flex justify-between items-center text-xs text-raas-cream/70">
             <span>Overall Capacity</span>
             <Users className="w-4 h-4 text-raas-gold" />
           </div>
           <div className="text-2xl font-extrabold text-raas-gold">
-            {capacity.allocatedAttendees || 0} / 500
+            {capacity.allocatedAttendees || 0} / {capacity.maxCapacity || 'Max'}
           </div>
           <p className="text-[11px] text-raas-marigold font-medium">
             {capacity.availableAttendees || 0} slots remaining available

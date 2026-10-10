@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
+import { checkRateLimit, getClientIp } from '@/lib/security/crypto';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   try {
-    const { token } = await params;
-    if (!token) {
-      return NextResponse.json({ error: 'Token missing' }, { status: 400 });
+    const ip = getClientIp(req);
+    const rateCheck = checkRateLimit(`ticket_view_${ip}`, 60, 60000);
+    if (!rateCheck.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please wait a moment.' }, { status: 429 });
     }
 
-    const pass = db.getPassByToken(token);
+    const { token } = await params;
+    if (!token || typeof token !== 'string' || token.length > 256 || !/^[a-zA-Z0-9_\-\.]+$/.test(token)) {
+      return NextResponse.json({ error: 'Invalid or malformed pass token' }, { status: 400 });
+    }
+
+    const pass = await db.getPassByTokenAsync(token);
     if (!pass) {
       return NextResponse.json({ error: 'Pass not found or invalid' }, { status: 404 });
     }
@@ -22,6 +29,12 @@ export async function GET(
     }
 
     const event = db.getEventConfig();
+
+    const rawPhone = String(order.customerPhone || '');
+    const maskedPhone =
+      rawPhone.length >= 10
+        ? `${rawPhone.slice(0, 2)}******${rawPhone.slice(-2)}`
+        : '**********';
 
     return NextResponse.json({
       pass: {
@@ -36,7 +49,7 @@ export async function GET(
       },
       order: {
         customerName: order.customerName,
-        customerPhone: order.customerPhone,
+        customerPhone: maskedPhone,
         amountPaise: order.amountPaise,
         paidAt: order.paidAt,
         attendeeDetails: order.attendeeDetails,

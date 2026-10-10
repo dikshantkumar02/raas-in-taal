@@ -1,8 +1,13 @@
-import { EventConfig, GatePass, Order, TicketCategory, TicketCategoryCode, CheckInRecord, CheckInResult, PaymentIdempotency } from './types';
-import { generateOrderReference, generateSecureToken, hashToken } from '../security/crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { EventConfig, GatePass, Order, TicketCategory, TicketCategoryCode, CheckInRecord, CheckInResult, PaymentIdempotency, Customer, StaffAccount, StaffTicketLookupResult } from './types';
+import { generateOrderReference, generateSecureToken, hashToken, hashPassword, verifyPassword, safeCompare } from '../security/crypto';
+import { supabaseAdmin } from './supabase';
 
 // In-memory persistent database engine (can synchronize with Supabase PostgreSQL)
 class EventStore {
+  private persistPath = path.join(process.cwd(), '.db_state.json');
+
   private event: EventConfig = {
     id: 'raas-in-taal-2026-event',
     slug: 'raas-in-taal-2026',
@@ -14,8 +19,8 @@ class EventStore {
     dandiyaNightTime: '18:00',
     maxCapacity: 500,
     phones: ['8003022503', '8278695419'],
-    instagramHandle: '@chaos_and_chill',
-    instagramUrl: 'https://instagram.com/chaos_and_chill',
+    instagramHandle: '@_chaos_and_chill',
+    instagramUrl: 'https://instagram.com/_chaos_and_chill_',
     refundPolicy: 'Tickets once booked are strictly non-refundable and non-transferable except in the event of official cancellation by organizers.',
     isActive: true,
   };
@@ -86,12 +91,240 @@ class EventStore {
   private passesByOrderId: Map<string, string> = new Map(); // orderId -> passId
   private checkIns: CheckInRecord[] = [];
   private idempotencyLogs: Map<string, PaymentIdempotency> = new Map();
+  private customers: Map<string, Customer> = new Map(); // email -> Customer
+  private staffAccounts: Map<string, StaffAccount> = new Map(); // id -> StaffAccount
+  private staffByUsername: Map<string, string> = new Map(); // username -> id
 
   // Concurrency lock simulation for atomic operations
   private lockPromise: Promise<void> = Promise.resolve();
 
+  constructor() {
+    this.loadFromDisk();
+    this.seedDefaultStaffAccounts();
+    if (supabaseAdmin) {
+      this.syncFromSupabase().catch(() => {});
+    }
+  }
+
+  public async syncFromSupabase(): Promise<void> {
+    if (!supabaseAdmin) return;
+    try {
+      const [ordersRes, passesRes, checkInsRes, customersRes, staffRes] = await Promise.all([
+        supabaseAdmin.from('orders').select('*'),
+        supabaseAdmin.from('passes').select('*'),
+        supabaseAdmin.from('check_ins').select('*'),
+        supabaseAdmin.from('customers').select('*'),
+        supabaseAdmin.from('staff_accounts').select('*'),
+      ]);
+
+      if (ordersRes.data) {
+        for (const row of ordersRes.data) {
+          const ord: Order = {
+            id: row.id,
+            orderReference: row.order_reference,
+            categoryCode: row.category_code,
+            quantity: row.quantity,
+            totalAttendees: row.total_attendees,
+            amountPaise: row.amount_paise,
+            currency: row.currency || 'INR',
+            customerName: row.customer_name,
+            customerEmail: row.customer_email,
+            customerPhone: row.customer_phone,
+            attendeeDetails: row.attendee_details || [],
+            groupFemaleVerified: Boolean(row.group_female_verified),
+            paymentStatus: row.payment_status,
+            reservationExpiresAt: new Date(row.reservation_expires_at),
+            createdAt: new Date(row.created_at),
+            updatedAt: new Date(row.updated_at),
+            phonepeTransactionId: row.phonepe_transaction_id,
+            phonepeProviderReference: row.phonepe_provider_reference,
+            paidAt: row.paid_at ? new Date(row.paid_at) : undefined,
+          };
+          this.orders.set(ord.id, ord);
+          this.ordersByReference.set(ord.orderReference.toUpperCase().trim(), ord.id);
+        }
+      }
+
+      if (passesRes.data) {
+        for (const row of passesRes.data) {
+          const p: GatePass = {
+            id: row.id,
+            orderId: row.order_id,
+            bookingReference: row.booking_reference,
+            qrToken: row.qr_token,
+            qrTokenHash: row.qr_token_hash,
+            categoryCode: row.category_code,
+            totalAttendees: row.total_attendees,
+            admittedCount: row.admitted_count,
+            status: row.status,
+            issuedAt: new Date(row.issued_at || row.created_at),
+            updatedAt: new Date(row.updated_at),
+          };
+          this.passes.set(p.id, p);
+          this.passesByOrderId.set(p.orderId, p.id);
+          this.passesByTokenHash.set(p.qrTokenHash, p.id);
+        }
+      }
+
+      if (checkInsRes.data) {
+        for (const row of checkInsRes.data) {
+          this.checkIns.push({
+            id: row.id,
+            passId: row.pass_id,
+            staffId: row.staff_id,
+            staffName: row.staff_name,
+            attendeesAdmitted: row.attendees_admitted,
+            admittedTotalAfterScan: row.admitted_total_after_scan,
+            scanTimestamp: new Date(row.scan_timestamp),
+            notes: row.notes,
+          });
+        }
+      }
+
+      if (customersRes.data) {
+        for (const row of customersRes.data) {
+          this.customers.set(row.email.toLowerCase().trim(), {
+            id: row.id,
+            email: row.email,
+            name: row.name,
+            phone: row.phone,
+            passwordHash: row.password_hash,
+            createdAt: new Date(row.created_at),
+          });
+        }
+      }
+
+      if (staffRes.data) {
+        for (const row of staffRes.data) {
+          this.staffAccounts.set(row.id, {
+            id: row.id,
+            username: row.username,
+            name: row.name,
+            pinHash: row.pin_hash,
+            role: row.role as any,
+            gateLocation: row.gate_location,
+            isActive: Boolean(row.is_active),
+            createdAt: new Date(row.created_at),
+          });
+          this.staffByUsername.set(row.username.toLowerCase(), row.id);
+        }
+      }
+    } catch (err) {
+      // Non-fatal: memory cache keeps running safely
+      console.warn('[Supabase Sync Notice]', err);
+    }
+  }
+
+  private seedDefaultStaffAccounts(): void {
+    if (this.staffAccounts.size > 0) return;
+    const defaultPin = process.env.STAFF_PIN || '202618';
+    const hashedPin = hashPassword(defaultPin);
+
+    const defaultStaff: StaffAccount[] = [
+      {
+        id: 'staff_gate_1',
+        username: 'gate1',
+        name: 'Officer Vikram (Gate 1)',
+        pinHash: hashedPin,
+        role: 'staff',
+        gateLocation: 'Main Arena Gate 1',
+        isActive: true,
+        createdAt: new Date(),
+      },
+      {
+        id: 'staff_gate_2',
+        username: 'gate2',
+        name: 'Officer Ananya (Gate 2)',
+        pinHash: hashedPin,
+        role: 'staff',
+        gateLocation: 'VIP Entry Gate 2',
+        isActive: true,
+        createdAt: new Date(),
+      },
+      {
+        id: 'staff_supervisor',
+        username: 'supervisor',
+        name: 'Gate Supervisor',
+        pinHash: hashedPin,
+        role: 'gate_supervisor',
+        gateLocation: 'All Gates / Helpdesk',
+        isActive: true,
+        createdAt: new Date(),
+      },
+    ];
+
+    for (const s of defaultStaff) {
+      this.staffAccounts.set(s.id, s);
+      this.staffByUsername.set(s.username.toLowerCase(), s.id);
+    }
+  }
+
+  private saveToDisk(): void {
+    try {
+      const state = {
+        orders: Array.from(this.orders.entries()),
+        passes: Array.from(this.passes.entries()),
+        checkIns: this.checkIns,
+        idempotencyLogs: Array.from(this.idempotencyLogs.entries()),
+        customers: Array.from(this.customers.entries()),
+        staffAccounts: Array.from(this.staffAccounts.entries()),
+      };
+      const tmpPath = `${this.persistPath}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, this.persistPath);
+    } catch { }
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (fs.existsSync(this.persistPath)) {
+        const raw = fs.readFileSync(this.persistPath, 'utf-8');
+        const state = JSON.parse(raw);
+        if (state.orders && Array.isArray(state.orders)) {
+          for (const [id, ord] of state.orders) {
+            ord.reservationExpiresAt = new Date(ord.reservationExpiresAt);
+            ord.createdAt = new Date(ord.createdAt);
+            ord.updatedAt = new Date(ord.updatedAt);
+            if (ord.paidAt) ord.paidAt = new Date(ord.paidAt);
+            this.orders.set(id, ord);
+            this.ordersByReference.set(ord.orderReference.toUpperCase().trim(), id);
+          }
+        }
+        if (state.passes && Array.isArray(state.passes)) {
+          for (const [id, p] of state.passes) {
+            p.issuedAt = new Date(p.issuedAt);
+            p.updatedAt = new Date(p.updatedAt);
+            this.passes.set(id, p);
+            this.passesByTokenHash.set(p.qrTokenHash, id);
+            this.passesByOrderId.set(p.orderId, id);
+          }
+        }
+        if (state.checkIns && Array.isArray(state.checkIns)) {
+          this.checkIns = state.checkIns.map((c: any) => ({
+            ...c,
+            scanTimestamp: new Date(c.scanTimestamp),
+          }));
+        }
+        if (state.customers && Array.isArray(state.customers)) {
+          for (const [email, c] of state.customers) {
+            c.createdAt = new Date(c.createdAt);
+            this.customers.set(email.toLowerCase().trim(), c);
+          }
+        }
+        if (state.staffAccounts && Array.isArray(state.staffAccounts)) {
+          for (const [id, s] of state.staffAccounts) {
+            s.createdAt = new Date(s.createdAt);
+            if (s.lastLoginAt) s.lastLoginAt = new Date(s.lastLoginAt);
+            this.staffAccounts.set(id, s);
+            this.staffByUsername.set(s.username.toLowerCase(), id);
+          }
+        }
+      }
+    } catch { }
+  }
+
   private async acquireLock<T>(fn: () => Promise<T> | T): Promise<T> {
-    let release: () => void = () => {};
+    let release: () => void = () => { };
     const waitPromise = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -176,6 +409,7 @@ class EventStore {
     attendeeDetails?: Array<{ name: string; gender?: string; relation?: string }>;
     groupFemaleVerified?: boolean;
     expiryMinutes?: number;
+    customReference?: string;
   }): Promise<{
     success: boolean;
     order?: Order;
@@ -222,7 +456,7 @@ class EventStore {
       }
 
       const orderId = `ord_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const orderRef = generateOrderReference();
+      const orderRef = params.customReference || generateOrderReference();
       const expiryMinutes = params.expiryMinutes || 10;
       const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
 
@@ -246,7 +480,35 @@ class EventStore {
       };
 
       this.orders.set(orderId, newOrder);
-      this.ordersByReference.set(orderRef, orderId);
+      this.ordersByReference.set(orderRef.toUpperCase().trim(), orderId);
+      this.saveToDisk();
+
+      if (supabaseAdmin) {
+        supabaseAdmin
+          .from('orders')
+          .upsert({
+            id: orderId,
+            order_reference: orderRef,
+            category_code: params.categoryCode,
+            quantity: params.quantity,
+            total_attendees: totalAttendeesRequested,
+            amount_paise: expectedAmountPaise,
+            currency: 'INR',
+            customer_name: params.customerName.trim(),
+            customer_email: params.customerEmail.trim().toLowerCase(),
+            customer_phone: params.customerPhone.trim(),
+            attendee_details: params.attendeeDetails || [],
+            group_female_verified: Boolean(params.groupFemaleVerified),
+            payment_status: 'RESERVED',
+            reservation_expires_at: expiresAt.toISOString(),
+            created_at: now.toISOString(),
+            updated_at: now.toISOString(),
+          })
+          .then(
+            () => {},
+            (err: unknown) => console.warn('[Supabase Order Upsert Warning]', err)
+          );
+      }
 
       return {
         success: true,
@@ -299,6 +561,7 @@ class EventStore {
         if (confirmedAttendees + order.totalAttendees > this.event.maxCapacity) {
           order.paymentStatus = 'EXPIRED';
           order.updatedAt = now;
+          this.saveToDisk();
           return {
             success: false,
             error: 'LATE_PAYMENT_CAPACITY_LOST_RECONCILIATION_REQUIRED',
@@ -336,6 +599,35 @@ class EventStore {
       this.passes.set(passId, gatePass);
       this.passesByTokenHash.set(qrHash, passId);
       this.passesByOrderId.set(order.id, passId);
+      this.saveToDisk();
+
+      if (supabaseAdmin) {
+        Promise.all([
+          supabaseAdmin
+            .from('orders')
+            .update({
+              payment_status: 'SUCCESS',
+              phonepe_transaction_id: params.phonepeTransactionId,
+              phonepe_provider_reference: params.phonepeProviderReference,
+              paid_at: now.toISOString(),
+              updated_at: now.toISOString(),
+            })
+            .eq('id', order.id),
+          supabaseAdmin.from('passes').upsert({
+            id: gatePass.id,
+            order_id: gatePass.orderId,
+            booking_reference: gatePass.bookingReference,
+            qr_token: gatePass.qrToken,
+            qr_token_hash: gatePass.qrTokenHash,
+            category_code: gatePass.categoryCode,
+            total_attendees: gatePass.totalAttendees,
+            admitted_count: gatePass.admittedCount,
+            status: gatePass.status,
+            issued_at: gatePass.issuedAt.toISOString(),
+            updated_at: gatePass.updatedAt.toISOString(),
+          }),
+        ]).catch((err) => console.warn('[Supabase Payment Confirm Warning]', err));
+      }
 
       return {
         success: true,
@@ -346,11 +638,6 @@ class EventStore {
   }
 
   // 4. ATOMIC CHECK-IN SCANNING (Mobile Staff Gate)
-  /**
-   * Atomic check-in for QR Gate Pass.
-   * Supports partial entry (e.g. 2 of 4 enter first, remaining 2 enter later).
-   * Rejects if all attendees already checked in or if pass is invalid/unpaid/revoked.
-   */
   public async recordCheckIn(params: {
     tokenOrHash: string;
     staffId: string;
@@ -359,7 +646,6 @@ class EventStore {
   }): Promise<CheckInResult> {
     return this.acquireLock(async () => {
       const input = params.tokenOrHash.trim();
-      // Look up by direct hash or by hashing the raw token
       let passId = this.passesByTokenHash.get(input);
       if (!passId) {
         const computedHash = hashToken(input);
@@ -480,6 +766,29 @@ class EventStore {
         scanTimestamp: new Date(),
       };
       this.checkIns.push(checkInRecord);
+      this.saveToDisk();
+
+      if (supabaseAdmin) {
+        Promise.all([
+          supabaseAdmin
+            .from('passes')
+            .update({
+              admitted_count: newAdmitted,
+              status: pass.status,
+              updated_at: pass.updatedAt.toISOString(),
+            })
+            .eq('id', pass.id),
+          supabaseAdmin.from('check_ins').insert({
+            id: checkInRecord.id,
+            pass_id: pass.id,
+            staff_id: params.staffId,
+            staff_name: params.staffName,
+            attendees_admitted: admitRequested,
+            admitted_total_after_scan: newAdmitted,
+            scan_timestamp: checkInRecord.scanTimestamp.toISOString(),
+          }),
+        ]).catch((err) => console.warn('[Supabase CheckIn Warning]', err));
+      }
 
       return {
         success: true,
@@ -501,7 +810,8 @@ class EventStore {
 
   // 5. LOOKUP HELPERS
   public getOrderByReference(reference: string): Order | undefined {
-    const orderId = this.ordersByReference.get(reference.toUpperCase().trim());
+    const clean = decodeURIComponent(reference || '').toUpperCase().trim();
+    const orderId = this.ordersByReference.get(clean);
     return orderId ? this.orders.get(orderId) : undefined;
   }
 
@@ -518,6 +828,91 @@ class EventStore {
     const hash = hashToken(token.trim());
     const passId = this.passesByTokenHash.get(hash);
     return passId ? this.passes.get(passId) : undefined;
+  }
+
+  public async getOrderByReferenceAsync(reference: string): Promise<Order | undefined> {
+    const mem = this.getOrderByReference(reference);
+    if (mem) return mem;
+
+    if (supabaseAdmin) {
+      try {
+        const clean = decodeURIComponent(reference || '').toUpperCase().trim();
+        const { data } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .eq('order_reference', clean)
+          .maybeSingle();
+
+        if (data) {
+          const ord: Order = {
+            id: data.id,
+            orderReference: data.order_reference,
+            categoryCode: data.category_code,
+            quantity: data.quantity,
+            totalAttendees: data.total_attendees,
+            amountPaise: data.amount_paise,
+            currency: data.currency || 'INR',
+            customerName: data.customer_name,
+            customerEmail: data.customer_email,
+            customerPhone: data.customer_phone,
+            attendeeDetails: data.attendee_details || [],
+            groupFemaleVerified: Boolean(data.group_female_verified),
+            paymentStatus: data.payment_status,
+            reservationExpiresAt: new Date(data.reservation_expires_at),
+            createdAt: new Date(data.created_at),
+            updatedAt: new Date(data.updated_at),
+            phonepeTransactionId: data.phonepe_transaction_id,
+            phonepeProviderReference: data.phonepe_provider_reference,
+            paidAt: data.paid_at ? new Date(data.paid_at) : undefined,
+          };
+          this.orders.set(ord.id, ord);
+          this.ordersByReference.set(ord.orderReference.toUpperCase().trim(), ord.id);
+          return ord;
+        }
+      } catch (err) {
+        console.warn('[Supabase Async Lookup Warning]', err);
+      }
+    }
+    return undefined;
+  }
+
+  public async getPassByTokenAsync(token: string): Promise<GatePass | undefined> {
+    const mem = this.getPassByToken(token);
+    if (mem) return mem;
+
+    if (supabaseAdmin) {
+      try {
+        const hash = hashToken(token.trim());
+        const { data } = await supabaseAdmin
+          .from('passes')
+          .select('*')
+          .or(`qr_token.eq.${token.trim()},qr_token_hash.eq.${hash}`)
+          .maybeSingle();
+
+        if (data) {
+          const p: GatePass = {
+            id: data.id,
+            orderId: data.order_id,
+            bookingReference: data.booking_reference,
+            qrToken: data.qr_token,
+            qrTokenHash: data.qr_token_hash,
+            categoryCode: data.category_code,
+            totalAttendees: data.total_attendees,
+            admittedCount: data.admitted_count,
+            status: data.status,
+            issuedAt: new Date(data.issued_at || data.created_at),
+            updatedAt: new Date(data.updated_at),
+          };
+          this.passes.set(p.id, p);
+          this.passesByOrderId.set(p.orderId, p.id);
+          this.passesByTokenHash.set(p.qrTokenHash, p.id);
+          return p;
+        }
+      } catch (err) {
+        console.warn('[Supabase Pass Lookup Warning]', err);
+      }
+    }
+    return undefined;
   }
 
   public getAllOrders(): Order[] {
@@ -539,6 +934,7 @@ class EventStore {
 
   public recordIdempotency(log: PaymentIdempotency): void {
     this.idempotencyLogs.set(log.transactionId, log);
+    this.saveToDisk();
   }
 
   // 7. REVOCATION / REFUND
@@ -556,8 +952,216 @@ class EventStore {
         order.paymentStatus = 'REFUNDED';
         order.updatedAt = new Date();
       }
+      this.saveToDisk();
       return true;
     });
+  }
+
+  // 8. CUSTOMER AUTH & BOOKINGS
+  public async registerCustomer(params: {
+    name: string;
+    email: string;
+    phone: string;
+    password: string;
+  }): Promise<{ success: boolean; customer?: Omit<Customer, 'passwordHash'>; error?: string }> {
+    return this.acquireLock(() => {
+      const email = params.email.trim().toLowerCase();
+      if (!email || !params.password || !params.name) {
+        return { success: false, error: 'Name, email, and password are required.' };
+      }
+      if (this.customers.has(email)) {
+        return { success: false, error: 'An account with this email already exists. Please log in.' };
+      }
+
+      const customer: Customer = {
+        id: `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: params.name.trim(),
+        email,
+        phone: params.phone.trim(),
+        passwordHash: hashPassword(params.password),
+        createdAt: new Date(),
+      };
+
+      this.customers.set(email, customer);
+      this.saveToDisk();
+
+      if (supabaseAdmin) {
+        supabaseAdmin
+          .from('customers')
+          .upsert({
+            id: customer.id,
+            email,
+            name: customer.name,
+            phone: customer.phone,
+            password_hash: customer.passwordHash,
+            created_at: customer.createdAt.toISOString(),
+          })
+          .then(
+            () => {},
+            (err: unknown) => console.warn('[Supabase Customer Warning]', err)
+          );
+      }
+
+      const { passwordHash: _, ...safe } = customer;
+      return { success: true, customer: safe };
+    });
+  }
+
+  public verifyCustomer(email: string, password: string): { success: boolean; customer?: Omit<Customer, 'passwordHash'>; error?: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    const customer = this.customers.get(cleanEmail);
+    if (!customer) {
+      return { success: false, error: 'No account found with this email. Please sign up.' };
+    }
+
+    if (!verifyPassword(password, customer.passwordHash)) {
+      return { success: false, error: 'Incorrect password.' };
+    }
+
+    const { passwordHash: _, ...safe } = customer;
+    return { success: true, customer: safe };
+  }
+
+  public getCustomerByEmail(email: string): Omit<Customer, 'passwordHash'> | undefined {
+    const customer = this.customers.get(email.trim().toLowerCase());
+    if (!customer) return undefined;
+    const { passwordHash: _, ...safe } = customer;
+    return safe;
+  }
+
+  public getCustomerBookings(email: string) {
+    const cleanEmail = email.trim().toLowerCase();
+    const results: Array<Order & { passQrToken?: string }> = [];
+
+    for (const order of this.orders.values()) {
+      if (order.customerEmail.toLowerCase() === cleanEmail) {
+        const passId = this.passesByOrderId.get(order.id);
+        const pass = passId ? this.passes.get(passId) : undefined;
+        results.push({
+          ...order,
+          passQrToken: pass?.qrToken,
+        });
+      }
+    }
+
+    return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  // 6. STAFF PORTAL AUTHENTICATION & MANAGEMENT
+  public verifyStaff(
+    identifier: string,
+    pin: string
+  ): { success: boolean; staff?: Omit<StaffAccount, 'pinHash'>; error?: string } {
+    const cleanId = (identifier || '').trim().toLowerCase();
+    let staffId = this.staffByUsername.get(cleanId);
+    let staff = staffId ? this.staffAccounts.get(staffId) : undefined;
+
+    // Fallback: If officer supplied PIN without username or generic 'staff' / 'gate'
+    if (!staff && (!cleanId || cleanId === 'staff' || cleanId === 'gate' || cleanId === 'gate1')) {
+      staff = this.staffAccounts.get('staff_gate_1');
+    }
+
+    if (!staff) {
+      return { success: false, error: 'Staff account not found.' };
+    }
+
+    if (!staff.isActive) {
+      return { success: false, error: 'Staff account has been revoked or deactivated.' };
+    }
+
+    const expectedPin = process.env.STAFF_PIN || '202618';
+    const isValidPin =
+      verifyPassword(pin, staff.pinHash) ||
+      safeCompare(pin, expectedPin);
+
+    if (!isValidPin) {
+      return { success: false, error: 'Invalid Staff PIN.' };
+    }
+
+    staff.lastLoginAt = new Date();
+    this.saveToDisk();
+
+    const { pinHash: _, ...safeStaff } = staff;
+    return { success: true, staff: safeStaff };
+  }
+
+  public getStaffById(id: string): Omit<StaffAccount, 'pinHash'> | null {
+    const staff = this.staffAccounts.get(id);
+    if (!staff) return null;
+    const { pinHash: _, ...safeStaff } = staff;
+    return safeStaff;
+  }
+
+  public revokeStaff(id: string): boolean {
+    const staff = this.staffAccounts.get(id);
+    if (!staff) return false;
+    staff.isActive = false;
+    this.saveToDisk();
+    return true;
+  }
+
+  public provisionStaff(account: {
+    username: string;
+    name: string;
+    pin: string;
+    role?: 'staff' | 'gate_supervisor';
+    gateLocation?: string;
+  }): Omit<StaffAccount, 'pinHash'> {
+    const id = `staff_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newStaff: StaffAccount = {
+      id,
+      username: account.username.toLowerCase().trim(),
+      name: account.name.trim(),
+      pinHash: hashPassword(account.pin),
+      role: account.role || 'staff',
+      gateLocation: account.gateLocation || 'General Gate',
+      isActive: true,
+      createdAt: new Date(),
+    };
+    this.staffAccounts.set(id, newStaff);
+    this.staffByUsername.set(newStaff.username, id);
+    this.saveToDisk();
+
+    const { pinHash: _, ...safeStaff } = newStaff;
+    return safeStaff;
+  }
+
+  // 7. PRIVACY-PRESERVING STAFF TICKET LOOKUP
+  public getTicketStatusForStaff(query: string): StaffTicketLookupResult | null {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return null;
+
+    let passId = this.passesByTokenHash.get(cleanQuery);
+    if (!passId) {
+      passId = this.passesByTokenHash.get(hashToken(cleanQuery));
+    }
+    if (!passId) {
+      // Lookup by booking reference
+      const orderId = this.ordersByReference.get(cleanQuery.toUpperCase());
+      if (orderId) {
+        passId = this.passesByOrderId.get(orderId);
+      }
+    }
+
+    if (!passId) return null;
+    const pass = this.passes.get(passId);
+    if (!pass) return null;
+    const order = this.orders.get(pass.orderId);
+    if (!order) return null;
+
+    // Return minimal staff-necessary data (no phone, no email, no amounts paid)
+    return {
+      valid: pass.status === 'VALID' || pass.status === 'ALL_ENTERED',
+      status: pass.status,
+      bookingReference: pass.bookingReference,
+      categoryCode: pass.categoryCode,
+      customerName: order.customerName,
+      totalAttendees: pass.totalAttendees,
+      admittedCount: pass.admittedCount,
+      remaining: Math.max(0, pass.totalAttendees - pass.admittedCount),
+      attendeeNames: order.attendeeDetails?.map((a) => a.name).filter(Boolean),
+      issuedAt: pass.issuedAt,
+    };
   }
 
   // For testing reset
@@ -569,6 +1173,13 @@ class EventStore {
     this.passesByOrderId.clear();
     this.checkIns = [];
     this.idempotencyLogs.clear();
+    this.customers.clear();
+    this.staffAccounts.clear();
+    this.staffByUsername.clear();
+    this.seedDefaultStaffAccounts();
+    try {
+      if (fs.existsSync(this.persistPath)) fs.unlinkSync(this.persistPath);
+    } catch { }
   }
 }
 

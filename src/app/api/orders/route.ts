@@ -2,9 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
 import { TicketCategoryCode } from '@/lib/db/types';
 import { initiatePhonePePayment } from '@/lib/payments/phonepe';
+import { verifySessionToken, checkRateLimit, getClientIp, sanitizeInputString } from '@/lib/security/crypto';
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rateCheck = checkRateLimit(`order_create_${ip}`, 20, 60000);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many order requests. Please wait a moment before trying again.' },
+        { status: 429 }
+      );
+    }
+
+    // Optional customer session for account linking
+    const sessionCookie = req.cookies.get('customer_session')?.value;
+    const sessionEmail = sessionCookie ? verifySessionToken(sessionCookie) : null;
+    const sessionCustomer = sessionEmail ? db.getCustomerByEmail(sessionEmail) : null;
+
     const body = await req.json();
     const { categoryCode, quantity, customerName, customerEmail, customerPhone, attendeeDetails, groupFemaleVerified } = body;
 
@@ -18,18 +33,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Quantity must be an integer between 1 and 10' }, { status: 400 });
     }
 
-    if (!customerName || typeof customerName !== 'string' || customerName.trim().length < 2) {
-      return NextResponse.json({ error: 'Please enter a valid full name' }, { status: 400 });
+    const sanitizedCustomerName = sanitizeInputString(customerName, 100);
+    if (!sanitizedCustomerName || sanitizedCustomerName.length < 2) {
+      return NextResponse.json({ error: 'Please enter a valid full name (maximum 100 characters)' }, { status: 400 });
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!customerEmail || !emailRegex.test(customerEmail)) {
+    if (!customerEmail || typeof customerEmail !== 'string' || customerEmail.length > 254 || !emailRegex.test(customerEmail)) {
       return NextResponse.json({ error: 'Please enter a valid email address' }, { status: 400 });
     }
 
     const cleanPhone = String(customerPhone || '').replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
-      return NextResponse.json({ error: 'Please enter a valid 10-digit mobile number' }, { status: 400 });
+    if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+      return NextResponse.json({ error: 'Please enter a valid mobile number (10 to 15 digits)' }, { status: 400 });
+    }
+
+    if (Array.isArray(attendeeDetails) && attendeeDetails.length > 20) {
+      return NextResponse.json({ error: 'Attendee details list exceeds maximum allowed entries' }, { status: 400 });
     }
 
     if (categoryCode === 'group' && !groupFemaleVerified) {
@@ -39,14 +59,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const cleanAttendees = Array.isArray(attendeeDetails)
+      ? attendeeDetails.slice(0, 20).map((a: any) => ({
+          name: sanitizeInputString(a?.name, 100),
+        }))
+      : [];
+
     // Atomic reservation in database against the 500-attendee limit
     const reservation = await db.createReservation({
       categoryCode: categoryCode as TicketCategoryCode,
       quantity: qty,
-      customerName: customerName.trim(),
-      customerEmail: customerEmail.trim(),
+      customerName: sanitizedCustomerName,
+      customerEmail: customerEmail.trim().toLowerCase(),
       customerPhone: cleanPhone,
-      attendeeDetails: Array.isArray(attendeeDetails) ? attendeeDetails : [],
+      attendeeDetails: cleanAttendees,
       groupFemaleVerified: Boolean(groupFemaleVerified),
       expiryMinutes: 10,
     });
@@ -54,7 +80,7 @@ export async function POST(req: NextRequest) {
     if (!reservation.success || !reservation.order) {
       if (reservation.error === 'CAPACITY_EXCEEDED') {
         return NextResponse.json(
-          { error: 'This ticket category cannot be booked because event capacity of 500 attendees has been reached.' },
+          { error: 'This ticket category cannot be booked because event capacity has been reached.' },
           { status: 409 }
         );
       }
@@ -84,6 +110,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (!paymentInit.success) {
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json(
+          { error: 'Payment gateway communication failed. Please try again later.' },
+          { status: 502 }
+        );
+      }
       // In sandbox/development when network or phonepe api is unavailable, supply fallback simulation redirect
       return NextResponse.json({
         success: true,

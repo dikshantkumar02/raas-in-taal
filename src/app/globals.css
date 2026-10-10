@@ -1,11 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Alex+Brush&family=Cinzel:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg-maroon-dark: #0F0205;
-  --bg-maroon-mid: #1E040B;
-  --bg-maroon-card: #28060F;
+  --bg-maroon-dark: #0B0104;
+  --bg-maroon-mid: #180308;
+  --bg-maroon-card: #24050E;
   --accent-gold: #E5A93C;
   --accent-gold-light: #FFD275;
   --accent-marigold: #F58220;
@@ -16,8 +18,75 @@ body {
   background-color: var(--bg-maroon-dark);
   color: var(--text-cream);
   min-height: 100vh;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+}
+
+.font-royal {
+  font-family: 'Cinzel', serif;
+}
+
+.font-cursive {
+  font-family: 'Alex Brush', cursive;
+}
+
+/* Grand Festive Hero Title Glow */
+.hero-festival-title {
+  font-family: 'Cinzel', serif;
+  background: linear-gradient(135deg, #FFF9F0 0%, #FFE6A3 30%, #FFD275 55%, #E5A93C 80%, #F58220 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 25px rgba(229, 169, 60, 0.55)) drop-shadow(0 0 50px rgba(245, 130, 32, 0.35));
+}
+
+/* Exact Reference Poster Neon Ticket Cards */
+.neon-card {
+  position: relative;
+  background: rgba(24, 3, 9, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 18px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.neon-card-pink {
+  border: 1.5px solid rgba(244, 114, 182, 0.8);
+  box-shadow: 0 0 20px -2px rgba(236, 72, 153, 0.4), inset 0 0 15px -4px rgba(236, 72, 153, 0.25);
+}
+.neon-card-pink:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: #F472B6;
+  box-shadow: 0 0 35px 2px rgba(236, 72, 153, 0.65), inset 0 0 20px -2px rgba(236, 72, 153, 0.4);
+}
+
+.neon-card-gold {
+  border: 1.5px solid rgba(251, 191, 36, 0.85);
+  box-shadow: 0 0 20px -2px rgba(245, 158, 11, 0.4), inset 0 0 15px -4px rgba(245, 158, 11, 0.25);
+}
+.neon-card-gold:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: #FBBF24;
+  box-shadow: 0 0 35px 2px rgba(245, 158, 11, 0.7), inset 0 0 20px -2px rgba(245, 158, 11, 0.4);
+}
+
+.neon-card-purple {
+  border: 1.5px solid rgba(192, 132, 252, 0.85);
+  box-shadow: 0 0 20px -2px rgba(168, 85, 247, 0.4), inset 0 0 15px -4px rgba(168, 85, 247, 0.25);
+}
+.neon-card-purple:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: #C084FC;
+  box-shadow: 0 0 35px 2px rgba(168, 85, 247, 0.7), inset 0 0 20px -2px rgba(168, 85, 247, 0.4);
+}
+
+.neon-card-teal {
+  border: 1.5px solid rgba(45, 212, 191, 0.85);
+  box-shadow: 0 0 20px -2px rgba(20, 184, 166, 0.4), inset 0 0 15px -4px rgba(20, 184, 166, 0.25);
+}
+.neon-card-teal:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: #2DD4BF;
+  box-shadow: 0 0 35px 2px rgba(20, 184, 166, 0.7), inset 0 0 20px -2px rgba(20, 184, 166, 0.4);
 }
 
 /* Base Festive Backdrop Pattern */

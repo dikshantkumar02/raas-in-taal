@@ -31,11 +31,12 @@ export default function BookingStatusPage({
   const verifyPayment = async (simulate = false) => {
     try {
       setLoading(true);
+      const cleanRef = decodeURIComponent(orderReference || '').trim();
       const res = await fetch('/api/payments/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orderReference,
+          orderReference: cleanRef,
           transactionId: txn,
           simulateSuccess: simulate,
         }),
@@ -47,7 +48,7 @@ export default function BookingStatusPage({
         setPassData(data.pass);
       } else {
         setOrderStatus(data.paymentStatus || 'PENDING');
-        setMessage(data.message || 'Waiting for payment confirmation...');
+        setMessage(data.error || data.message || 'Waiting for payment confirmation...');
       }
     } catch (err: any) {
       setMessage('Failed to verify status. Please refresh.');

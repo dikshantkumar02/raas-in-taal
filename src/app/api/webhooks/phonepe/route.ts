@@ -7,6 +7,9 @@ import { sendTicketConfirmationEmail } from '@/lib/email/service';
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
+    if (rawBody.length > 256 * 1024) {
+      return NextResponse.json({ error: 'Payload size exceeds allowable limit.' }, { status: 413 });
+    }
     const xVerify = req.headers.get('x-verify') || '';
 
     let parsedBody: any;

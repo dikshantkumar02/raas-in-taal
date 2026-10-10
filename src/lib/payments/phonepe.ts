@@ -112,6 +112,7 @@ export async function initiatePhonePePayment(params: {
       body: JSON.stringify({
         request: base64Payload,
       }),
+      signal: AbortSignal.timeout(12000),
     });
 
     const data = await res.json();
@@ -154,8 +155,10 @@ export async function checkPhonePePaymentStatus(transactionId: string): Promise<
   );
 
   try {
+    const cleanMerchantId = encodeURIComponent(config.merchantId.trim());
+    const cleanTxnId = encodeURIComponent(transactionId.trim());
     const res = await fetch(
-      `${config.hostUrl}/pg/v1/status/${config.merchantId}/${transactionId}`,
+      `${config.hostUrl}/pg/v1/status/${cleanMerchantId}/${cleanTxnId}`,
       {
         method: 'GET',
         headers: {
@@ -163,6 +166,7 @@ export async function checkPhonePePaymentStatus(transactionId: string): Promise<
           'X-VERIFY': xVerify,
           'X-MERCHANT-ID': config.merchantId,
         },
+        signal: AbortSignal.timeout(10000),
       }
     );
 
