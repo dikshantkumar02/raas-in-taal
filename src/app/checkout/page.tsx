@@ -552,6 +552,18 @@ function CheckoutContent() {
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
+            {process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID?.startsWith('rzp_test_') && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-400/30 text-amber-200 text-xs space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-amber-300">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Razorpay Test Mode Active</span>
+                </p>
+                <p className="text-[11px] text-amber-100/75 leading-relaxed">
+                  Real banking UPI apps reject test transactions. To test payment success:
+                  <br />• <strong>UPI:</strong> select UPI &rarr; enter VPA <span className="font-mono text-amber-300 bg-black/50 px-1 py-0.5 rounded">success@razorpay</span>
+                  <br />• <strong>Card:</strong> use test card <span className="font-mono text-amber-300 bg-black/50 px-1 py-0.5 rounded">4111 1111 1111 1111</span> (any future MM/YY, CVV 123, OTP 123456)
+                </p>
+              </div>
             )}
 
             <button
