@@ -85,6 +85,8 @@ function CheckoutContent() {
   // Authentication State (Optional pre-fill from logged-in account)
   const [customerUser, setCustomerUser] = useState<CustomerUser | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+  const [isLocalhost, setIsLocalhost] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const catInfo = CATEGORY_DATA[category];
@@ -108,6 +110,10 @@ function CheckoutContent() {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const h = window.location.hostname;
+      setIsLocalhost(h === 'localhost' || h === '127.0.0.1');
+    }
     verifySession();
     // Preload Razorpay checkout script early on mount
     if (typeof window !== 'undefined' && !(window as any).Razorpay) {
@@ -120,6 +126,62 @@ function CheckoutContent() {
       }
     }
   }, []);
+
+  const handleSimulatePayment = async () => {
+    setErrorMessage('');
+    const finalName = (customerName || customerUser?.name || '').trim();
+    const finalEmail = (customerEmail || customerUser?.email || '').trim();
+    const finalPhone = (customerPhone || customerUser?.phone || '').trim();
+
+    if (!finalName) {
+      setErrorMessage('Please enter your full name.');
+      return;
+    }
+    if (!finalEmail || !finalEmail.includes('@')) {
+      setErrorMessage('Please enter a valid email address for your QR pass delivery.');
+      return;
+    }
+    const cleanPh = finalPhone.replace(/\D/g, '');
+    if (cleanPh.length < 10) {
+      setErrorMessage('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (category === 'group' && !groupFemaleVerified) {
+      setErrorMessage('Please confirm that at least 1 attendee in your group is female.');
+      return;
+    }
+
+    setSimulating(true);
+    try {
+      const res = await fetch('/api/dev/simulate-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryCode: category,
+          quantity,
+          customerName: finalName,
+          customerEmail: finalEmail,
+          customerPhone: cleanPh,
+          groupFemaleVerified: category === 'group' ? groupFemaleVerified : false,
+          attendeeDetails: attendeeNames.map((name, idx) => ({
+            name: name.trim() || (idx === 0 ? finalName : `Attendee ${idx + 1}`),
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.token) {
+        setErrorMessage(data.error || 'Simulation failed');
+        setSimulating(false);
+        return;
+      }
+
+      router.push(`/ticket/${encodeURIComponent(data.token)}?simulated=1`);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Simulation network error');
+      setSimulating(false);
+    }
+  };
 
   // Sync attendee input fields
   useEffect(() => {
@@ -571,7 +633,7 @@ function CheckoutContent() {
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || simulating}
               className="w-full gold-gradient-btn py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 hover:scale-[1.01] transition-transform"
             >
               {submitting ? (
@@ -587,6 +649,32 @@ function CheckoutContent() {
                 </>
               )}
             </button>
+
+            {isLocalhost && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleSimulatePayment}
+                  disabled={submitting || simulating}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/40 hover:to-teal-600/40 border border-emerald-400/50 text-emerald-300 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg hover:border-emerald-300"
+                >
+                  {simulating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                      <span>Simulating Payment &amp; Issuing Pass...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-emerald-400" />
+                      <span>⚡ Dev Mode: Simulate Test Payment &amp; Email Pass</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-center text-emerald-400/80 mt-1 font-medium">
+                  Localhost Test Only: Reserves booking, generates real QR pass, and dispatches real ticket email for ₹0.
+                </p>
+              </div>
+            )}
           </form>
         </div>
 
