@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
         amount: razorpayOrder.amount,
         currency: razorpayOrder.currency,
         receipt: razorpayOrder.receipt,
+        key_id: config.keyId,
         ...(bookingOrderReference ? { orderReference: bookingOrderReference } : {}),
       });
     } catch (razorpayErr: any) {
