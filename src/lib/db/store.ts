@@ -524,8 +524,11 @@ class EventStore {
    */
   public async confirmPaymentAndIssuePass(params: {
     orderId: string;
-    phonepeTransactionId: string;
+    phonepeTransactionId?: string;
     phonepeProviderReference?: string;
+    razorpayOrderId?: string;
+    razorpayPaymentId?: string;
+    razorpaySignature?: string;
   }): Promise<{
     success: boolean;
     order?: Order;
@@ -572,8 +575,11 @@ class EventStore {
 
       // Update Order
       order.paymentStatus = 'SUCCESS';
-      order.phonepeTransactionId = params.phonepeTransactionId;
-      order.phonepeProviderReference = params.phonepeProviderReference;
+      if (params.phonepeTransactionId) order.phonepeTransactionId = params.phonepeTransactionId;
+      if (params.phonepeProviderReference) order.phonepeProviderReference = params.phonepeProviderReference;
+      if (params.razorpayOrderId) order.razorpayOrderId = params.razorpayOrderId;
+      if (params.razorpayPaymentId) order.razorpayPaymentId = params.razorpayPaymentId;
+      if (params.razorpaySignature) order.razorpaySignature = params.razorpaySignature;
       order.paidAt = now;
       order.updatedAt = now;
 

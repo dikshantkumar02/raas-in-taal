@@ -49,6 +49,9 @@ export interface Order {
   paymentStatus: PaymentStatus;
   phonepeTransactionId?: string;
   phonepeProviderReference?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
+  razorpaySignature?: string;
   reservationExpiresAt: Date;
   paidAt?: Date;
   createdAt: Date;

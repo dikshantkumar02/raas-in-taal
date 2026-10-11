@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Script from 'next/script';
 import { TicketCategoryCode } from '@/lib/db/types';
 import {
   ShieldCheck,
@@ -17,6 +18,7 @@ import {
   Phone,
   KeyRound,
   LogOut,
+  CreditCard,
 } from 'lucide-react';
 
 interface CustomerUser {
@@ -148,7 +150,29 @@ function CheckoutContent() {
     setSubmitting(true);
 
     try {
+      // Helper to ensure Razorpay checkout script is loaded
+      const ensureRazorpayLoaded = async (): Promise<boolean> => {
+        if (typeof window !== 'undefined' && (window as any).Razorpay) return true;
+        return new Promise((resolve) => {
+          const s = document.createElement('script');
+          s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          s.onload = () => resolve(true);
+          s.onerror = () => resolve(false);
+          document.body.appendChild(s);
+        });
+      };
+
+      const isLoaded = await ensureRazorpayLoaded();
+      if (!isLoaded || !(window as any).Razorpay) {
+        setErrorMessage('Unable to load Razorpay payment gateway. Please check your internet connection.');
+        setSubmitting(false);
+        return;
+      }
+
+      // Step 1: Call Backend to create order
       const payload = {
+        amount: totalPrice * 100, // paise (minimum 100 paise)
+        currency: 'INR',
         categoryCode: category,
         quantity,
         customerName: finalName,
@@ -160,7 +184,7 @@ function CheckoutContent() {
         })),
       };
 
-      const res = await fetch('/api/orders', {
+      const res = await fetch('/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -168,17 +192,92 @@ function CheckoutContent() {
 
       const data = await res.json();
 
-      if (!res.ok) {
-        setErrorMessage(data.error || 'Failed to place booking');
+      if (!res.ok || !data.order_id) {
+        setErrorMessage(data.error || 'Failed to initialize payment order');
         setSubmitting(false);
         return;
       }
 
-      if (data.redirectUrl) {
-        window.location.href = data.redirectUrl;
-      } else {
-        router.push(`/booking/${data.orderReference}`);
-      }
+      const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TmZ25PPym09aUr';
+
+      // Step 2: Open Razorpay Standard Checkout Modal
+      const options = {
+        key: keyId,
+        amount: data.amount,
+        currency: data.currency || 'INR',
+        name: 'Raas in Taal 2026',
+        description: `${catInfo.name} Ticket (${quantity} pkg, ${totalAttendees} passes)`,
+        order_id: data.order_id,
+        prefill: {
+          name: finalName,
+          email: finalEmail,
+          contact: cleanPh,
+        },
+        notes: {
+          orderReference: data.orderReference,
+          category,
+        },
+        theme: {
+          color: '#d97706',
+        },
+        handler: async function (response: {
+          razorpay_payment_id: string;
+          razorpay_order_id: string;
+          razorpay_signature: string;
+        }) {
+          // Step 3: Backend signature verification
+          try {
+            setSubmitting(true);
+            const verifyRes = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                orderReference: data.orderReference,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+
+            if (!verifyRes.ok || !verifyData.success) {
+              setErrorMessage(verifyData.error || 'Payment signature verification failed.');
+              setSubmitting(false);
+              return;
+            }
+
+            // Redirect to ticket confirmation page
+            const targetRef = verifyData.orderReference || data.orderReference;
+            if (targetRef) {
+              router.push(`/booking/${targetRef}`);
+            } else {
+              setSubmitting(false);
+            }
+          } catch (err: any) {
+            setErrorMessage(err.message || 'Network error verifying payment.');
+            setSubmitting(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            // Handle modal dismiss (user cancelled)
+            setSubmitting(false);
+            setErrorMessage('Payment cancelled by user. You can try again whenever ready.');
+          },
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+
+      // Handle payment failure event
+      rzp.on('payment.failed', function (failRes: any) {
+        setSubmitting(false);
+        const reason = failRes.error?.description || failRes.error?.reason || 'Payment failed';
+        setErrorMessage(`Payment failed: ${reason}. Please try again or check your card/UPI details.`);
+      });
+
+      rzp.open();
     } catch (err: any) {
       setErrorMessage(err.message || 'Network error creating booking order');
       setSubmitting(false);
@@ -186,7 +285,9 @@ function CheckoutContent() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-20">
+    <>
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative z-20">
       <div className="text-center space-y-2 mb-8">
         <h1 className="text-3xl sm:text-5xl font-black gold-gradient-text uppercase font-royal">
           Secure Ticket Checkout
@@ -400,11 +501,12 @@ function CheckoutContent() {
               {submitting ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Reserving Capacity &amp; Connecting to PhonePe...</span>
+                  <span>Reserving &amp; Opening Razorpay Checkout...</span>
                 </>
               ) : (
                 <>
-                  <span>Proceed to Pay ₹{totalPrice} via PhonePe</span>
+                  <CreditCard className="w-4 h-4" />
+                  <span>Proceed to Pay ₹{totalPrice} via Razorpay</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -465,7 +567,8 @@ function CheckoutContent() {
         </div>
       </div>
     </div>
-  );
+  </>
+);
 }
 
 export default function CheckoutPage() {

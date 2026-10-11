@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
 import { checkPhonePePaymentStatus } from '@/lib/payments/phonepe';
+import { verifyRazorpaySignature } from '@/lib/payments/razorpay';
 import { sendTicketConfirmationEmail } from '@/lib/email/service';
 import { checkRateLimit, getClientIp } from '@/lib/security/crypto';
 
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { orderReference, transactionId, simulateSuccess } = body;
+    const { orderReference, transactionId, simulateSuccess, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
 
     if (!orderReference) {
       return NextResponse.json({ error: 'Order reference is required' }, { status: 400 });
@@ -76,10 +77,20 @@ export async function POST(req: NextRequest) {
     }
 
     let isPaymentValid = false;
-    let providerRef = transactionId || 'UAT_REF';
+    let providerRef = transactionId || razorpay_payment_id || 'UAT_REF';
 
-    // Sandbox simulation bypasses external PhonePe network call only in development / UAT
-    if (simulateSuccess && isSandboxEnvironment) {
+    if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      const isValid = verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+      if (!isValid) {
+        return NextResponse.json(
+          { error: 'Invalid Razorpay payment signature' },
+          { status: 400 }
+        );
+      }
+      isPaymentValid = true;
+      providerRef = razorpay_payment_id;
+    } else if (simulateSuccess && isSandboxEnvironment) {
+      // Sandbox simulation bypasses external PhonePe network call only in development / UAT
       isPaymentValid = true;
       providerRef = transactionId || `SIM_CAPTURED_${Date.now()}`;
     } else if (transactionId) {
