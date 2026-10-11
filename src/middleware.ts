@@ -112,8 +112,8 @@ export function middleware(req: NextRequest) {
   // 7. Pass through with Edge Security and CORS Headers
   const res = NextResponse.next();
   res.headers.set('X-DNS-Prefetch-Control', 'off');
-  res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-  res.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  res.headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
   res.headers.set('X-Permitted-Cross-Domain-Policies', 'none');
 
   if (origin && isTrustedOrigin(origin, host)) {

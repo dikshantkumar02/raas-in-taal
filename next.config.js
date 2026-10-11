@@ -28,15 +28,19 @@ const nextConfig = {
             value: 'max-age=63072000; includeSubDomains; preload',
           },
           {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin-allow-popups',
+          },
+          {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://checkout.razorpay.com",
+              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://checkout.razorpay.com https://*.razorpay.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https:",
               "connect-src 'self' https://api-preprod.phonepe.com https://api.phonepe.com https://*.supabase.co https://api.razorpay.com https://lumberjack.razorpay.com https://*.razorpay.com",
-              "frame-src 'self' https://api-preprod.phonepe.com https://mercury-t2.phonepe.com https://api.phonepe.com https://api.razorpay.com https://checkout.razorpay.com",
+              "frame-src 'self' https://api-preprod.phonepe.com https://mercury-t2.phonepe.com https://api.phonepe.com https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com",
               "frame-ancestors 'none'",
               "object-src 'none'",
               "base-uri 'self'",
