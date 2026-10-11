@@ -273,6 +273,7 @@ function CheckoutContent() {
           name: finalName,
           email: finalEmail,
           contact: cleanPh,
+          ...(keyId.startsWith('rzp_test_') ? { vpa: 'success@razorpay' } : {}),
         },
         notes: {
           orderReference: data.orderReference,

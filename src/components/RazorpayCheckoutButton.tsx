@@ -118,6 +118,7 @@ export function RazorpayCheckoutButton({
           name: customerName,
           email: customerEmail,
           contact: customerPhone.replace(/\D/g, ''),
+          ...(keyId.startsWith('rzp_test_') ? { vpa: 'success@razorpay' } : {}),
         },
         notes: {
           orderReference: orderData.orderReference || orderData.receipt,
