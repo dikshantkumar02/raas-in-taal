@@ -109,6 +109,16 @@ function CheckoutContent() {
 
   useEffect(() => {
     verifySession();
+    // Preload Razorpay checkout script early on mount
+    if (typeof window !== 'undefined' && !(window as any).Razorpay) {
+      const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    }
   }, []);
 
   // Sync attendee input fields
@@ -153,18 +163,69 @@ function CheckoutContent() {
       // Helper to ensure Razorpay checkout script is loaded
       const ensureRazorpayLoaded = async (): Promise<boolean> => {
         if (typeof window !== 'undefined' && (window as any).Razorpay) return true;
+
         return new Promise((resolve) => {
-          const s = document.createElement('script');
-          s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-          s.onload = () => resolve(true);
-          s.onerror = () => resolve(false);
-          document.body.appendChild(s);
+          let resolved = false;
+
+          const check = () => {
+            if (typeof window !== 'undefined' && (window as any).Razorpay) {
+              if (!resolved) {
+                resolved = true;
+                resolve(true);
+              }
+              return true;
+            }
+            return false;
+          };
+
+          if (check()) return;
+
+          let script = document.querySelector(
+            'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+          ) as HTMLScriptElement;
+
+          if (!script) {
+            script = document.createElement('script');
+            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            script.async = true;
+            document.body.appendChild(script);
+          }
+
+          script.addEventListener('load', () => {
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                resolve(Boolean((window as any).Razorpay));
+              }
+            }, 100);
+          });
+
+          script.addEventListener('error', () => {
+            if (!resolved) {
+              resolved = true;
+              resolve(false);
+            }
+          });
+
+          const interval = setInterval(() => {
+            if (check()) {
+              clearInterval(interval);
+            }
+          }, 150);
+
+          setTimeout(() => {
+            clearInterval(interval);
+            if (!resolved) {
+              resolved = true;
+              resolve(Boolean((window as any).Razorpay));
+            }
+          }, 8000);
         });
       };
 
       const isLoaded = await ensureRazorpayLoaded();
       if (!isLoaded || !(window as any).Razorpay) {
-        setErrorMessage('Unable to load Razorpay payment gateway. Please check your internet connection.');
+        setErrorMessage('Unable to load Razorpay payment gateway. Please check your internet connection or disable adblockers on this page.');
         setSubmitting(false);
         return;
       }
