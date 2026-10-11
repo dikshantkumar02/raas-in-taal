@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { EventConfig, GatePass, Order, TicketCategory, TicketCategoryCode, CheckInRecord, CheckInResult, PaymentIdempotency, Customer, StaffAccount, StaffTicketLookupResult } from './types';
 import { generateOrderReference, generateSecureToken, hashToken, hashPassword, verifyPassword, safeCompare } from '../security/crypto';
 import { supabaseAdmin } from './supabase';
@@ -108,13 +109,28 @@ class EventStore {
 
   // Concurrency lock simulation for atomic operations
   private lockPromise: Promise<void> = Promise.resolve();
+  private initPromise: Promise<void> | null = null;
+  private isInitialized = false;
 
   constructor() {
     this.loadFromDisk();
     this.seedDefaultStaffAccounts();
     if (supabaseAdmin) {
-      this.syncFromSupabase().catch(() => {});
+      this.initPromise = this.syncFromSupabase();
     }
+  }
+
+  public async ensureInitialized(): Promise<void> {
+    if (!supabaseAdmin) {
+      this.isInitialized = true;
+      return;
+    }
+    if (this.isInitialized) return;
+    if (!this.initPromise) {
+      this.initPromise = this.syncFromSupabase();
+    }
+    await this.initPromise;
+    this.isInitialized = true;
   }
 
   public async syncFromSupabase(): Promise<void> {
@@ -147,8 +163,9 @@ class EventStore {
             reservationExpiresAt: new Date(row.reservation_expires_at),
             createdAt: new Date(row.created_at),
             updatedAt: new Date(row.updated_at),
-            customerId: row.customer_id,
-            razorpayOrderId: row.razorpay_order_id,
+            customerId: row.customer_id || undefined,
+            razorpayOrderId: row.razorpay_order_id || row.phonepe_provider_reference || undefined,
+            razorpayPaymentId: row.razorpay_payment_id || row.phonepe_transaction_id || undefined,
             paidAt: row.paid_at ? new Date(row.paid_at) : undefined,
           };
           this.orders.set(ord.id, ord);
@@ -353,10 +370,70 @@ class EventStore {
     this.lockPromise = this.lockPromise.then(() => waitPromise);
 
     await previousLock;
+    await this.ensureInitialized();
     try {
       return await fn();
     } finally {
       release();
+    }
+  }
+
+  public async upsertOrderToSupabase(order: Order): Promise<void> {
+    if (!supabaseAdmin) return;
+    const fullPayload = {
+      id: order.id,
+      order_reference: order.orderReference,
+      category_code: order.categoryCode,
+      quantity: order.quantity,
+      total_attendees: order.totalAttendees,
+      amount_paise: order.amountPaise,
+      currency: order.currency,
+      customer_name: order.customerName,
+      customer_email: order.customerEmail,
+      customer_phone: order.customerPhone,
+      customer_id: order.customerId || null,
+      attendee_details: order.attendeeDetails,
+      group_female_verified: order.groupFemaleVerified,
+      payment_status: order.paymentStatus,
+      razorpay_order_id: order.razorpayOrderId || null,
+      razorpay_payment_id: order.razorpayPaymentId || null,
+      phonepe_provider_reference: order.razorpayOrderId || null,
+      phonepe_transaction_id: order.razorpayPaymentId || null,
+      reservation_expires_at: order.reservationExpiresAt.toISOString(),
+      paid_at: order.paidAt ? order.paidAt.toISOString() : null,
+      created_at: order.createdAt.toISOString(),
+      updated_at: order.updatedAt.toISOString(),
+    };
+
+    const { error } = await supabaseAdmin.from('orders').upsert(fullPayload);
+    if (error) {
+      // Resilient fallback if customer_id, razorpay_order_id, or razorpay_payment_id columns are not yet in Supabase
+      const { customer_id, razorpay_order_id, razorpay_payment_id, ...fallbackPayload } = fullPayload;
+      const { error: fallbackErr } = await supabaseAdmin.from('orders').upsert(fallbackPayload);
+      if (fallbackErr) {
+        console.warn('[Supabase Fallback Order Upsert Warning]', fallbackErr);
+      }
+    }
+  }
+
+  public async upsertPassToSupabase(gatePass: GatePass): Promise<void> {
+    if (!supabaseAdmin) return;
+    const passPayload = {
+      id: gatePass.id,
+      order_id: gatePass.orderId,
+      booking_reference: gatePass.bookingReference,
+      qr_token: gatePass.qrToken,
+      qr_token_hash: gatePass.qrTokenHash,
+      category_code: gatePass.categoryCode,
+      total_attendees: gatePass.totalAttendees,
+      admitted_count: gatePass.admittedCount,
+      status: gatePass.status,
+      issued_at: gatePass.issuedAt.toISOString(),
+      updated_at: gatePass.updatedAt.toISOString(),
+    };
+    const { error } = await supabaseAdmin.from('passes').upsert(passPayload);
+    if (error) {
+      console.warn('[Supabase Pass Upsert Warning]', error);
     }
   }
 
@@ -476,7 +553,7 @@ class EventStore {
         };
       }
 
-      const orderId = `ord_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const orderId = crypto.randomUUID();
       const orderRef = params.customReference || generateOrderReference();
       const expiryMinutes = params.expiryMinutes || 10;
       const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
@@ -514,31 +591,7 @@ class EventStore {
       this.saveToDisk();
 
       if (supabaseAdmin) {
-        supabaseAdmin
-          .from('orders')
-          .upsert({
-            id: orderId,
-            order_reference: orderRef,
-            category_code: params.categoryCode,
-            quantity: params.quantity,
-            total_attendees: totalAttendeesRequested,
-            amount_paise: expectedAmountPaise,
-            currency: 'INR',
-            customer_name: params.customerName.trim(),
-            customer_email: params.customerEmail.trim().toLowerCase(),
-            customer_phone: params.customerPhone.trim(),
-            customer_id: resolvedCustomerId,
-            attendee_details: params.attendeeDetails || [],
-            group_female_verified: Boolean(params.groupFemaleVerified),
-            payment_status: 'RESERVED',
-            reservation_expires_at: expiresAt.toISOString(),
-            created_at: now.toISOString(),
-            updated_at: now.toISOString(),
-          })
-          .then(
-            () => {},
-            (err: unknown) => console.warn('[Supabase Order Upsert Warning]', err)
-          );
+        await this.upsertOrderToSupabase(newOrder);
       }
 
       return {
@@ -548,46 +601,26 @@ class EventStore {
     });
   }
 
-  public attachRazorpayOrderId(orderId: string, razorpayOrderId: string): void {
+  public async attachRazorpayOrderId(orderId: string, razorpayOrderId: string): Promise<void> {
     const order = this.orders.get(orderId);
     if (order) {
       order.razorpayOrderId = razorpayOrderId;
       order.updatedAt = new Date();
       this.saveToDisk();
       if (supabaseAdmin) {
-        supabaseAdmin
-          .from('orders')
-          .update({
-            razorpay_order_id: razorpayOrderId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', orderId)
-          .then(
-            () => {},
-            (err: unknown) => console.warn('[Supabase Order Update Warning]', err)
-          );
+        await this.upsertOrderToSupabase(order);
       }
     }
   }
 
-  public attachPhonePeTransactionId(orderId: string, phonepeTransactionId: string): void {
+  public async attachPhonePeTransactionId(orderId: string, phonepeTransactionId: string): Promise<void> {
     const order = this.orders.get(orderId);
     if (order) {
       order.phonepeTransactionId = phonepeTransactionId;
       order.updatedAt = new Date();
       this.saveToDisk();
       if (supabaseAdmin) {
-        supabaseAdmin
-          .from('orders')
-          .update({
-            phonepe_transaction_id: phonepeTransactionId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', orderId)
-          .then(
-            () => {},
-            (err: unknown) => console.warn('[Supabase Order Update Warning]', err)
-          );
+        await this.upsertOrderToSupabase(order);
       }
     }
   }
@@ -686,7 +719,7 @@ class EventStore {
       // Generate 1 QR Gate Pass per booking
       const qrToken = generateSecureToken(`RIT_${order.categoryCode.toUpperCase()}`);
       const qrHash = hashToken(qrToken);
-      const passId = `pass_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const passId = crypto.randomUUID();
 
       const gatePass: GatePass = {
         id: passId,
@@ -708,31 +741,10 @@ class EventStore {
       this.saveToDisk();
 
       if (supabaseAdmin) {
-        Promise.all([
-          supabaseAdmin
-            .from('orders')
-            .update({
-              payment_status: 'SUCCESS',
-              phonepe_transaction_id: params.phonepeTransactionId,
-              phonepe_provider_reference: params.phonepeProviderReference,
-              paid_at: now.toISOString(),
-              updated_at: now.toISOString(),
-            })
-            .eq('id', order.id),
-          supabaseAdmin.from('passes').upsert({
-            id: gatePass.id,
-            order_id: gatePass.orderId,
-            booking_reference: gatePass.bookingReference,
-            qr_token: gatePass.qrToken,
-            qr_token_hash: gatePass.qrTokenHash,
-            category_code: gatePass.categoryCode,
-            total_attendees: gatePass.totalAttendees,
-            admitted_count: gatePass.admittedCount,
-            status: gatePass.status,
-            issued_at: gatePass.issuedAt.toISOString(),
-            updated_at: gatePass.updatedAt.toISOString(),
-          }),
-        ]).catch((err) => console.warn('[Supabase Payment Confirm Warning]', err));
+        await Promise.all([
+          this.upsertOrderToSupabase(order),
+          this.upsertPassToSupabase(gatePass),
+        ]);
       }
 
       return {
@@ -863,7 +875,7 @@ class EventStore {
 
       // Record audit check-in
       const checkInRecord: CheckInRecord = {
-        id: `chk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: crypto.randomUUID(),
         passId: pass.id,
         staffId: params.staffId,
         staffName: params.staffName,
@@ -875,7 +887,7 @@ class EventStore {
       this.saveToDisk();
 
       if (supabaseAdmin) {
-        Promise.all([
+        await Promise.all([
           supabaseAdmin
             .from('passes')
             .update({
@@ -925,9 +937,81 @@ class EventStore {
     return this.orders.get(id);
   }
 
+  public async getOrderByIdAsync(id: string): Promise<Order | undefined> {
+    const mem = this.getOrderById(id);
+    if (mem) return mem;
+    if (supabaseAdmin) {
+      try {
+        const { data } = await supabaseAdmin.from('orders').select('*').eq('id', id).maybeSingle();
+        if (data) {
+          const ord: Order = {
+            id: data.id,
+            orderReference: data.order_reference,
+            categoryCode: data.category_code,
+            quantity: data.quantity,
+            totalAttendees: data.total_attendees,
+            amountPaise: data.amount_paise,
+            currency: data.currency || 'INR',
+            customerName: data.customer_name,
+            customerEmail: data.customer_email,
+            customerPhone: data.customer_phone,
+            attendeeDetails: data.attendee_details || [],
+            groupFemaleVerified: Boolean(data.group_female_verified),
+            paymentStatus: data.payment_status,
+            reservationExpiresAt: new Date(data.reservation_expires_at),
+            createdAt: new Date(data.created_at),
+            updatedAt: new Date(data.updated_at),
+            customerId: data.customer_id || undefined,
+            razorpayOrderId: data.razorpay_order_id || data.phonepe_provider_reference || undefined,
+            razorpayPaymentId: data.razorpay_payment_id || data.phonepe_transaction_id || undefined,
+            paidAt: data.paid_at ? new Date(data.paid_at) : undefined,
+          };
+          this.orders.set(ord.id, ord);
+          this.ordersByReference.set(ord.orderReference.toUpperCase().trim(), ord.id);
+          return ord;
+        }
+      } catch (err) {
+        console.warn('[Supabase Order ID Lookup Warning]', err);
+      }
+    }
+    return undefined;
+  }
+
   public getPassByOrderId(orderId: string): GatePass | undefined {
     const passId = this.passesByOrderId.get(orderId);
     return passId ? this.passes.get(passId) : undefined;
+  }
+
+  public async getPassByOrderIdAsync(orderId: string): Promise<GatePass | undefined> {
+    const mem = this.getPassByOrderId(orderId);
+    if (mem) return mem;
+    if (supabaseAdmin) {
+      try {
+        const { data } = await supabaseAdmin.from('passes').select('*').eq('order_id', orderId).maybeSingle();
+        if (data) {
+          const p: GatePass = {
+            id: data.id,
+            orderId: data.order_id,
+            bookingReference: data.booking_reference,
+            qrToken: data.qr_token,
+            qrTokenHash: data.qr_token_hash,
+            categoryCode: data.category_code,
+            totalAttendees: data.total_attendees,
+            admittedCount: data.admitted_count,
+            status: data.status,
+            issuedAt: new Date(data.issued_at || data.created_at),
+            updatedAt: new Date(data.updated_at),
+          };
+          this.passes.set(p.id, p);
+          this.passesByOrderId.set(p.orderId, p.id);
+          this.passesByTokenHash.set(p.qrTokenHash, p.id);
+          return p;
+        }
+      } catch (err) {
+        console.warn('[Supabase Pass by Order ID Lookup Warning]', err);
+      }
+    }
+    return undefined;
   }
 
   public getPassByToken(token: string): GatePass | undefined {
@@ -1070,7 +1154,7 @@ class EventStore {
     phone: string;
     password: string;
   }): Promise<{ success: boolean; customer?: Omit<Customer, 'passwordHash'>; error?: string }> {
-    return this.acquireLock(() => {
+    return this.acquireLock(async () => {
       const email = params.email.trim().toLowerCase();
       if (!email || !params.password || !params.name) {
         return { success: false, error: 'Name, email, and password are required.' };
@@ -1092,7 +1176,7 @@ class EventStore {
       this.saveToDisk();
 
       if (supabaseAdmin) {
-        supabaseAdmin
+        const { error } = await supabaseAdmin
           .from('customers')
           .upsert({
             id: customer.id,
@@ -1101,11 +1185,10 @@ class EventStore {
             phone: customer.phone,
             password_hash: customer.passwordHash,
             created_at: customer.createdAt.toISOString(),
-          })
-          .then(
-            () => {},
-            (err: unknown) => console.warn('[Supabase Customer Warning]', err)
-          );
+          });
+        if (error) {
+          console.warn('[Supabase Customer Upsert Warning]', error);
+        }
       }
 
       const { passwordHash: _, ...safe } = customer;
@@ -1135,6 +1218,33 @@ class EventStore {
     return safe;
   }
 
+  public async getCustomerByEmailAsync(email: string): Promise<Omit<Customer, 'passwordHash'> | undefined> {
+    await this.ensureInitialized();
+    const cleanEmail = email.trim().toLowerCase();
+    let customer = this.customers.get(cleanEmail);
+    if (!customer && supabaseAdmin) {
+      try {
+        const { data } = await supabaseAdmin.from('customers').select('*').eq('email', cleanEmail).maybeSingle();
+        if (data) {
+          customer = {
+            id: data.id,
+            email: data.email,
+            name: data.name,
+            phone: data.phone,
+            passwordHash: data.password_hash,
+            createdAt: new Date(data.created_at),
+          };
+          this.customers.set(cleanEmail, customer);
+        }
+      } catch (err) {
+        console.warn('[Supabase Customer Lookup Warning]', err);
+      }
+    }
+    if (!customer) return undefined;
+    const { passwordHash: _, ...safe } = customer;
+    return safe;
+  }
+
   public getCustomerBookings(emailOrId: string) {
     const clean = emailOrId.trim().toLowerCase();
     const results: Array<Order & { passQrToken?: string }> = [];
@@ -1155,9 +1265,15 @@ class EventStore {
     return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  public linkCustomerBookings(customerId: string, email: string): number {
+  public async getCustomerBookingsAsync(emailOrId: string) {
+    await this.ensureInitialized();
+    return this.getCustomerBookings(emailOrId);
+  }
+
+  public async linkCustomerBookings(customerId: string, email: string): Promise<number> {
     const cleanEmail = email.trim().toLowerCase();
     let linkedCount = 0;
+    const promises: Promise<any>[] = [];
 
     for (const order of this.orders.values()) {
       if (order.customerEmail.toLowerCase() === cleanEmail && order.customerId !== customerId) {
@@ -1165,20 +1281,16 @@ class EventStore {
         order.updatedAt = new Date();
         linkedCount++;
         if (supabaseAdmin) {
-          supabaseAdmin
-            .from('orders')
-            .update({ customer_id: customerId, updated_at: new Date().toISOString() })
-            .eq('id', order.id)
-            .then(
-              () => {},
-              (err: unknown) => console.warn('[Supabase Link Warning]', err)
-            );
+          promises.push(this.upsertOrderToSupabase(order));
         }
       }
     }
 
     if (linkedCount > 0) {
       this.saveToDisk();
+    }
+    if (promises.length > 0) {
+      await Promise.all(promises);
     }
     return linkedCount;
   }
@@ -1241,7 +1353,7 @@ class EventStore {
     return { success: true };
   }
 
-  public updateCustomerPassword(email: string, newPassword: string): boolean {
+  public async updateCustomerPassword(email: string, newPassword: string): Promise<boolean> {
     const cleanEmail = email.trim().toLowerCase();
     const customer = this.customers.get(cleanEmail);
     if (!customer) return false;
@@ -1250,14 +1362,14 @@ class EventStore {
     this.saveToDisk();
 
     if (supabaseAdmin) {
-      supabaseAdmin
-        .from('customers')
-        .update({ password_hash: customer.passwordHash })
-        .eq('email', cleanEmail)
-        .then(
-          () => {},
-          (err: unknown) => console.warn('[Supabase Password Update Warning]', err)
-        );
+      try {
+        await supabaseAdmin
+          .from('customers')
+          .update({ password_hash: customer.passwordHash })
+          .eq('email', cleanEmail);
+      } catch (err: unknown) {
+        console.warn('[Supabase Password Update Warning]', err);
+      }
     }
 
     return true;
@@ -1382,6 +1494,8 @@ class EventStore {
 
   // For testing reset
   public reset(): void {
+    this.isInitialized = false;
+    this.initPromise = null;
     this.orders.clear();
     this.ordersByReference.clear();
     this.passes.clear();

@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    await db.ensureInitialized();
     const authResult = db.verifyStaff(cleanUsername, cleanPin);
     if (!authResult.success || !authResult.staff) {
       recordFailedAttempt(lockoutKey, 5, 15 * 60 * 1000);

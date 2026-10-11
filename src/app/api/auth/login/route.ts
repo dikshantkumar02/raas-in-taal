@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    await db.ensureInitialized();
     const verification = db.verifyCustomer(normEmail, password);
     if (!verification.success || !verification.customer) {
       recordFailedAttempt(lockoutKey, 5, 10 * 60 * 1000);
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     clearFailedAttempts(lockoutKey);
-    db.linkCustomerBookings(verification.customer.id, verification.customer.email);
+    await db.linkCustomerBookings(verification.customer.id, verification.customer.email);
     const token = createSessionToken(verification.customer.email);
     const response = NextResponse.json({
       success: true,

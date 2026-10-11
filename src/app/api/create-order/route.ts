@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const customer = db.getCustomerByEmail(authEmail);
+    await db.ensureInitialized();
+    const customer = await db.getCustomerByEmailAsync(authEmail);
     if (!customer) {
       return NextResponse.json(
         { error: 'Customer account not found. Please sign up or sign in.' },
@@ -158,7 +159,7 @@ export async function POST(req: NextRequest) {
 
       // Associate Razorpay Order ID with internal booking order for strict payment binding
       if (reservationOrderId) {
-        db.attachRazorpayOrderId(reservationOrderId, razorpayOrder.id);
+        await db.attachRazorpayOrderId(reservationOrderId, razorpayOrder.id);
       }
 
       return NextResponse.json({

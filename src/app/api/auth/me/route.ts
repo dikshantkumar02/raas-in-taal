@@ -15,13 +15,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const customer = db.getCustomerByEmail(email);
+    await db.ensureInitialized();
+    const customer = await db.getCustomerByEmailAsync(email);
     if (!customer) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    db.linkCustomerBookings(customer.id, customer.email);
-    const bookings = db.getCustomerBookings(customer.id);
+    await db.linkCustomerBookings(customer.id, customer.email);
+    const bookings = await db.getCustomerBookingsAsync(customer.id);
 
     return NextResponse.json({
       authenticated: true,

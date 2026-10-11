@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: reg.error || 'Failed to create account.' }, { status: 400 });
     }
 
-    db.linkCustomerBookings(reg.customer.id, reg.customer.email);
+    await db.linkCustomerBookings(reg.customer.id, reg.customer.email);
     const token = createSessionToken(reg.customer.email);
     const response = NextResponse.json({
       success: true,

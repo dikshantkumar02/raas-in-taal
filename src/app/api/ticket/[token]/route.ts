@@ -23,7 +23,7 @@ export async function GET(
       return NextResponse.json({ error: 'Pass not found or invalid' }, { status: 404 });
     }
 
-    const order = db.getOrderById(pass.orderId);
+    const order = await db.getOrderByIdAsync(pass.orderId);
     if (!order) {
       return NextResponse.json({ error: 'Associated order not found' }, { status: 404 });
     }

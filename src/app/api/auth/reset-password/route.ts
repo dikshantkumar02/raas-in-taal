@@ -38,8 +38,9 @@ export async function POST(req: NextRequest) {
 
     const normEmail = email.trim().toLowerCase();
 
+    await db.ensureInitialized();
     // Verify customer exists
-    const customer = db.getCustomerByEmail(normEmail);
+    const customer = await db.getCustomerByEmailAsync(normEmail);
     if (!customer) {
       return NextResponse.json({ error: 'Invalid verification request.' }, { status: 400 });
     }
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Update password securely in database (hashes with salt + scrypt/argon/sha256)
-    const updated = db.updateCustomerPassword(normEmail, newPassword);
+    const updated = await db.updateCustomerPassword(normEmail, newPassword);
     if (!updated) {
       return NextResponse.json({ error: 'Failed to update password.' }, { status: 500 });
     }

@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     clearFailedAttempts(adminLockoutKey);
+    await db.ensureInitialized();
 
     const body = await req.json();
     const { action, payload } = body;

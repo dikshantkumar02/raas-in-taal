@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
 
     const isSandboxEnvironment = process.env.NODE_ENV !== 'production';
 
+    await db.ensureInitialized();
     let order = await db.getOrderByReferenceAsync(orderReference);
     if (!order && simulateSuccess && isSandboxEnvironment) {
       // Auto-recover reservation for dev / sandbox testing

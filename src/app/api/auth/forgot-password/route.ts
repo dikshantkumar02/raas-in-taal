@@ -48,7 +48,8 @@ export async function POST(req: NextRequest) {
       message: 'If an account exists for this email address, password recovery instructions with a verification code have been sent.',
     };
 
-    const customer = db.getCustomerByEmail(normEmail);
+    await db.ensureInitialized();
+    const customer = await db.getCustomerByEmailAsync(normEmail);
     if (!customer) {
       // Consistent timing / privacy: do not disclose account absence
       return NextResponse.json(genericResponse);

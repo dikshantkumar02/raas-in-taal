@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ authenticated: false, error: 'Invalid or expired staff session' }, { status: 401 });
     }
 
+    await db.ensureInitialized();
     const staff = db.getStaffById(payload.staffId);
     if (!staff) {
       return NextResponse.json({ authenticated: false, error: 'Staff account no longer exists' }, { status: 401 });

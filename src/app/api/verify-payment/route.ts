@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
     let gatePassDetails: any = null;
 
     // Check if order exists in the booking database
+    await db.ensureInitialized();
     let order = orderReference ? await db.getOrderByReferenceAsync(orderReference) : null;
     if (!order && orderId) {
       // Look up order in memory store if razorpayOrderId or receipt was recorded

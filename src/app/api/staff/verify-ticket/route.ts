@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
     const customToken = req.headers.get('x-staff-token');
     const pin = req.headers.get('x-staff-pin');
 
+    await db.ensureInitialized();
     let isAuthorized = false;
     const token = headerToken || cookieToken || customToken;
 
