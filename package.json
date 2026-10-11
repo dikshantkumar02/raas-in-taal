@@ -18,7 +18,8 @@
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.8",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "resend": "^6.32.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

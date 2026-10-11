@@ -1,11 +1,13 @@
 import { Order, GatePass, EventConfig } from '../db/types';
-import { generateQrDataUrl } from '../qr/generator';
+import { Resend } from 'resend';
 
 export interface EmailDeliveryRecord {
   orderId: string;
   recipientEmail: string;
   sentAt: Date;
   status: 'SENT' | 'FAILED' | 'MOCKED';
+  provider?: string;
+  resendId?: string;
   error?: string;
 }
 
@@ -20,6 +22,57 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+async function sendViaGmail(
+  gmailUser: string,
+  gmailPass: string,
+  order: Order,
+  emailHtml: string,
+  qrImageUrl: string
+): Promise<{ success: boolean; status: 'SENT' | 'FAILED'; provider: string; error?: string }> {
+  try {
+    const nodemailer = await import('nodemailer');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailPass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Raas in Taal — Dandiya Night" <${gmailUser}>`,
+      to: order.customerEmail,
+      subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
+      html: emailHtml,
+      attachments: [
+        {
+          filename: `gate-pass-${order.orderReference}.png`,
+          path: qrImageUrl,
+        },
+      ],
+    });
+
+    emailDeliveryLog.set(order.id, {
+      orderId: order.id,
+      recipientEmail: order.customerEmail,
+      sentAt: new Date(),
+      status: 'SENT',
+      provider: 'gmail_fallback',
+    });
+    return { success: true, status: 'SENT', provider: 'gmail_fallback' };
+  } catch (err: any) {
+    emailDeliveryLog.set(order.id, {
+      orderId: order.id,
+      recipientEmail: order.customerEmail,
+      sentAt: new Date(),
+      status: 'FAILED',
+      provider: 'gmail_fallback',
+      error: err.message,
+    });
+    return { success: false, status: 'FAILED', provider: 'gmail_fallback', error: err.message };
+  }
+}
+
 /**
  * Sends a confirmation email with gate pass link, event information, and QR scanner code.
  * Safe & idempotent: won't crash payment flow if email fails.
@@ -29,7 +82,7 @@ export async function sendTicketConfirmationEmail(params: {
   pass: GatePass;
   event: EventConfig;
   appBaseUrl: string;
-}): Promise<{ success: boolean; status: 'SENT' | 'FAILED' | 'MOCKED'; error?: string }> {
+}): Promise<{ success: boolean; status: 'SENT' | 'FAILED' | 'MOCKED'; provider?: string; error?: string }> {
   const { order, pass, event, appBaseUrl } = params;
   const passUrl = `${appBaseUrl}/ticket/${encodeURIComponent(pass.qrToken)}`;
 
@@ -107,115 +160,104 @@ export async function sendTicketConfirmationEmail(params: {
   `;
 
   const apiKey = (process.env.EMAIL_API_KEY || '').replace(/['"]/g, '').trim();
-  const provider = (process.env.EMAIL_PROVIDER || 'mock').replace(/['"]/g, '').trim();
-  const gmailUser = (process.env.GMAIL_USER || process.env.EMAIL_FROM_ADDRESS || '').replace(/['"]/g, '').trim();
+  const provider = (process.env.EMAIL_PROVIDER || 'mock').replace(/['"]/g, '').trim().toLowerCase();
+  const gmailUser = (process.env.GMAIL_USER || '').replace(/['"]/g, '').trim();
   const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').replace(/['"]/g, '').replace(/\s+/g, '').trim();
 
-  // Gmail SMTP Provider (free, no domain needed)
+  // Explicit Gmail provider mode
   if (provider === 'gmail' && gmailUser && gmailPass) {
-    try {
-      const nodemailer = await import('nodemailer');
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: gmailUser,
-          pass: gmailPass,
-        },
-      });
-
-      const mailOptions: any = {
-        from: `"Raas in Taal — Dandiya Night" <${gmailUser}>`,
-        to: order.customerEmail,
-        subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
-        html: emailHtml,
-      };
-
-      mailOptions.attachments = [
-        {
-          filename: `gate-pass-${order.orderReference}.png`,
-          path: qrImageUrl,
-        },
-      ];
-
-      await transporter.sendMail(mailOptions);
-
-      emailDeliveryLog.set(order.id, {
-        orderId: order.id,
-        recipientEmail: order.customerEmail,
-        sentAt: new Date(),
-        status: 'SENT',
-      });
-      return { success: true, status: 'SENT' };
-    } catch (err: any) {
-      emailDeliveryLog.set(order.id, {
-        orderId: order.id,
-        recipientEmail: order.customerEmail,
-        sentAt: new Date(),
-        status: 'FAILED',
-        error: err.message,
-      });
-      return { success: false, status: 'FAILED', error: err.message };
-    }
+    return sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
   }
 
-  // If in mock or development mode or no key provided, log cleanly without secret exposure
-  if (provider === 'mock' || !apiKey) {
+  // Mock / offline testing mode
+  if (provider === 'mock' || (!apiKey && !gmailUser)) {
     const record: EmailDeliveryRecord = {
       orderId: order.id,
       recipientEmail: order.customerEmail,
       sentAt: new Date(),
       status: 'MOCKED',
+      provider: 'mock',
     };
     emailDeliveryLog.set(order.id, record);
-    return { success: true, status: 'MOCKED' };
+    return { success: true, status: 'MOCKED', provider: 'mock' };
   }
 
-  // Resend transactional email integration
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: process.env.EMAIL_FROM_ADDRESS || 'tickets@raasintaal.com',
+  // Resend transactional email provider
+  if (apiKey) {
+    try {
+      const resend = new Resend(apiKey);
+      const rawFrom = (process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev').replace(/['"]/g, '').trim();
+      const fromName = (process.env.EMAIL_FROM_NAME || 'Raas in Taal').replace(/['"]/g, '').trim();
+      const formattedFrom = rawFrom.includes('<') ? rawFrom : `${fromName} <${rawFrom}>`;
+
+      const response = await resend.emails.send({
+        from: formattedFrom,
         to: [order.customerEmail],
         subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
         html: emailHtml,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (res.ok) {
-      emailDeliveryLog.set(order.id, {
-        orderId: order.id,
-        recipientEmail: order.customerEmail,
-        sentAt: new Date(),
-        status: 'SENT',
       });
-      return { success: true, status: 'SENT' };
-    } else {
-      const errData = await res.json();
+
+      if (!response.error && response.data?.id) {
+        emailDeliveryLog.set(order.id, {
+          orderId: order.id,
+          recipientEmail: order.customerEmail,
+          sentAt: new Date(),
+          status: 'SENT',
+          provider: 'resend',
+          resendId: response.data.id,
+        });
+        return { success: true, status: 'SENT', provider: 'resend' };
+      }
+
+      console.warn(`[Resend] Delivery warning for ${order.customerEmail}:`, response.error?.message);
+
+      // If Resend failed (e.g. unverified custom domain for external recipient) and Gmail fallback is available:
+      if (gmailUser && gmailPass) {
+        console.info(`[Email] Falling back to Gmail SMTP for ${order.customerEmail}`);
+        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+        if (fallbackRes.success) {
+          return fallbackRes;
+        }
+      }
+
       emailDeliveryLog.set(order.id, {
         orderId: order.id,
         recipientEmail: order.customerEmail,
         sentAt: new Date(),
         status: 'FAILED',
-        error: errData.message,
+        provider: 'resend',
+        error: response.error?.message || 'Resend delivery failed',
       });
-      return { success: false, status: 'FAILED', error: errData.message };
+      return { success: false, status: 'FAILED', provider: 'resend', error: response.error?.message };
+    } catch (err: any) {
+      console.error(`[Resend] Delivery error for ${order.customerEmail}:`, err.message);
+
+      if (gmailUser && gmailPass) {
+        console.info(`[Email] Falling back to Gmail SMTP for ${order.customerEmail}`);
+        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+        if (fallbackRes.success) {
+          return fallbackRes;
+        }
+      }
+
+      emailDeliveryLog.set(order.id, {
+        orderId: order.id,
+        recipientEmail: order.customerEmail,
+        sentAt: new Date(),
+        status: 'FAILED',
+        provider: 'resend',
+        error: err.message,
+      });
+      return { success: false, status: 'FAILED', provider: 'resend', error: err.message };
     }
-  } catch (err: any) {
-    emailDeliveryLog.set(order.id, {
-      orderId: order.id,
-      recipientEmail: order.customerEmail,
-      sentAt: new Date(),
-      status: 'FAILED',
-      error: err.message,
-    });
-    return { success: false, status: 'FAILED', error: err.message };
   }
+
+  // Fallback if apiKey not set but Gmail is
+  if (gmailUser && gmailPass) {
+    return sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+  }
+
+  return { success: false, status: 'FAILED', error: 'No email service credentials configured' };
 }
 
 export function getEmailDeliveryStatus(orderId: string): EmailDeliveryRecord | undefined {
