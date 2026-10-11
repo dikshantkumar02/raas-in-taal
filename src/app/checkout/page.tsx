@@ -552,6 +552,8 @@ function CheckoutContent() {
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
               </div>
+            )}
+
             {process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID?.startsWith('rzp_test_') && (
               <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-400/30 text-amber-200 text-xs space-y-1">
                 <p className="font-bold flex items-center gap-1.5 text-amber-300">
