@@ -83,13 +83,21 @@ export default function TicketPassPage({
           <span>Back to Home</span>
         </Link>
 
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-raas-maroon-mid border border-raas-gold/30 hover:border-raas-gold text-xs font-bold text-raas-gold shadow-sm cursor-pointer"
-        >
-          <Printer className="w-4 h-4" />
-          <span>Print / Save Pass</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/account"
+            className="text-xs font-bold text-amber-300 hover:text-amber-200 transition-colors"
+          >
+            My Bookings
+          </Link>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-raas-maroon-mid border border-raas-gold/30 hover:border-raas-gold text-xs font-bold text-raas-gold shadow-sm cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print / Save Pass</span>
+          </button>
+        </div>
       </div>
 
       {/* Official Gate Pass Card */}
