@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     clearFailedAttempts(lockoutKey);
+    db.linkCustomerBookings(verification.customer.id, verification.customer.email);
     const token = createSessionToken(verification.customer.email);
     const response = NextResponse.json({
       success: true,

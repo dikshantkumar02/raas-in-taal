@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRazorpayClient, getRazorpayConfig } from '@/lib/payments/razorpay';
 import { db } from '@/lib/db/store';
 import { TicketCategoryCode } from '@/lib/db/types';
-import { checkRateLimit, getClientIp, sanitizeInputString } from '@/lib/security/crypto';
+import { checkRateLimit, getClientIp, sanitizeInputString, verifySessionToken } from '@/lib/security/crypto';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,6 +12,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Too many requests. Please wait a moment before trying again.' },
         { status: 429 }
+      );
+    }
+
+    // Server-side mandatory authentication enforcement
+    const sessionCookie = req.cookies.get('customer_session')?.value;
+    if (!sessionCookie) {
+      return NextResponse.json(
+        { error: 'Authentication required. Please sign in or create an account to book tickets.' },
+        { status: 401 }
+      );
+    }
+
+    const authEmail = verifySessionToken(sessionCookie);
+    if (!authEmail) {
+      return NextResponse.json(
+        { error: 'Session invalid or expired. Please sign in again.' },
+        { status: 401 }
+      );
+    }
+
+    const customer = db.getCustomerByEmail(authEmail);
+    if (!customer) {
+      return NextResponse.json(
+        { error: 'Customer account not found. Please sign up or sign in.' },
+        { status: 401 }
       );
     }
 
@@ -38,7 +63,6 @@ export async function POST(req: NextRequest) {
       categoryCode,
       quantity,
       customerName,
-      customerEmail,
       customerPhone,
       attendeeDetails,
       groupFemaleVerified,
@@ -54,9 +78,11 @@ export async function POST(req: NextRequest) {
     }
 
     let bookingOrderReference: string | undefined = undefined;
+    let reservationOrderId: string | undefined = undefined;
+    let serverAuthoritativeAmountPaise: number | undefined = undefined;
 
     // If checkout attendee / category information is provided, create reservation in database
-    if (categoryCode && customerName && customerEmail) {
+    if (categoryCode) {
       if (!['stag_girls', 'couple', 'group', 'family'].includes(categoryCode)) {
         return NextResponse.json({ error: 'Invalid ticket category' }, { status: 400 });
       }
@@ -66,8 +92,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Quantity must be between 1 and 10' }, { status: 400 });
       }
 
-      const sanitizedCustomerName = sanitizeInputString(customerName, 100);
-      const cleanPhone = String(customerPhone || '').replace(/\D/g, '');
+      // Derive customer details authoritatively from verified server session
+      const cleanCustomerEmail = customer.email.trim().toLowerCase();
+      const sanitizedCustomerName = sanitizeInputString(customerName || customer.name, 100);
+      const cleanPhone = customerPhone ? String(customerPhone).replace(/\D/g, '') : (customer.phone || '');
 
       const cleanAttendees = Array.isArray(attendeeDetails)
         ? attendeeDetails.slice(0, 20).map((a: any) => ({
@@ -79,8 +107,9 @@ export async function POST(req: NextRequest) {
         categoryCode: categoryCode as TicketCategoryCode,
         quantity: qty,
         customerName: sanitizedCustomerName,
-        customerEmail: customerEmail.trim().toLowerCase(),
+        customerEmail: cleanCustomerEmail,
         customerPhone: cleanPhone,
+        customerId: customer.id,
         attendeeDetails: cleanAttendees,
         groupFemaleVerified: Boolean(groupFemaleVerified),
         expiryMinutes: 10,
@@ -97,6 +126,17 @@ export async function POST(req: NextRequest) {
       }
 
       bookingOrderReference = reservation.order.orderReference;
+      reservationOrderId = reservation.order.id;
+      // Server-authoritative pricing: ignore any client-supplied amount
+      serverAuthoritativeAmountPaise = reservation.order.amountPaise;
+    }
+
+    const finalAmount = serverAuthoritativeAmountPaise ?? Math.round(Number(amount));
+    if (!finalAmount || isNaN(finalAmount) || finalAmount < 100) {
+      return NextResponse.json(
+        { error: 'Amount is required and must be at least 100 paise' },
+        { status: 400 }
+      );
     }
 
     // Call Razorpay API to create order
@@ -105,7 +145,7 @@ export async function POST(req: NextRequest) {
       const generatedReceipt = receipt || bookingOrderReference || `rcpt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
       const orderOptions: any = {
-        amount: Math.round(numericAmount),
+        amount: finalAmount,
         currency: currency || 'INR',
         receipt: generatedReceipt,
         notes: {
@@ -115,6 +155,11 @@ export async function POST(req: NextRequest) {
       };
 
       const razorpayOrder = await razorpay.orders.create(orderOptions);
+
+      // Associate Razorpay Order ID with internal booking order for strict payment binding
+      if (reservationOrderId) {
+        db.attachRazorpayOrderId(reservationOrderId, razorpayOrder.id);
+      }
 
       return NextResponse.json({
         order_id: razorpayOrder.id,

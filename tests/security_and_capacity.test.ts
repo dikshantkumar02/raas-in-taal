@@ -1,7 +1,7 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/lib/db/store';
-import { calculatePayChecksum, calculateStatusChecksum, verifyCallbackSignature } from '../src/lib/payments/phonepe';
+import { verifyRazorpaySignature } from '../src/lib/payments/razorpay';
 import {
   generateSecureToken,
   hashToken,
@@ -42,23 +42,27 @@ describe('Raas in Taal — Strict Security, Capacity & QR Gate Pass Test Suite',
   });
 
   // TEST 2: Invalid payment signatures and forged callbacks
-  test('2. PhonePe callback signature verification rejects invalid and forged signatures', () => {
-    const saltKey = '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399';
-    const saltIndex = '1';
-    const validPayload = Buffer.from(JSON.stringify({ code: 'PAYMENT_SUCCESS', amount: 24900 })).toString('base64');
-    
-    // Calculate valid signature
+  test('2. Razorpay payment signature verification rejects invalid and forged signatures', () => {
+    const secret = 'test_secret_key_123';
+    const orderId = 'order_test_123';
+    const paymentId = 'pay_test_456';
     const crypto = require('node:crypto');
-    const validHash = crypto.createHash('sha256').update(validPayload + saltKey).digest('hex') + '###' + saltIndex;
+    const validSignature = crypto.createHmac('sha256', secret).update(`${orderId}|${paymentId}`).digest('hex');
 
-    const isValid = verifyCallbackSignature(validPayload, validHash, saltKey, saltIndex);
-    assert.equal(isValid, true, 'Valid signature must be verified');
+    const origSecret = process.env.RAZORPAY_KEY_SECRET;
+    try {
+      process.env.RAZORPAY_KEY_SECRET = secret;
+      const isValid = verifyRazorpaySignature(orderId, paymentId, validSignature);
+      assert.equal(isValid, true, 'Valid signature must be verified');
 
-    const isForged = verifyCallbackSignature(validPayload, 'forged_fake_hash_123###1', saltKey, saltIndex);
-    assert.equal(isForged, false, 'Forged signature must be rejected');
+      const isForged = verifyRazorpaySignature(orderId, paymentId, 'forged_fake_hash_123');
+      assert.equal(isForged, false, 'Forged signature must be rejected');
 
-    const isTamperedPayload = verifyCallbackSignature('tampered_base64_content', validHash, saltKey, saltIndex);
-    assert.equal(isTamperedPayload, false, 'Tampered payload with previous hash must be rejected');
+      const isMismatched = verifyRazorpaySignature('wrong_order_id', paymentId, validSignature);
+      assert.equal(isMismatched, false, 'Mismatched order ID must be rejected');
+    } finally {
+      process.env.RAZORPAY_KEY_SECRET = origSecret;
+    }
   });
 
   // TEST 3: Pending, failed, unverified payments cannot generate valid entry passes
@@ -556,17 +560,14 @@ describe('Raas in Taal — Strict Security, Capacity & QR Gate Pass Test Suite',
   });
 
   // TEST 24: Strict sandbox isolation under production flag
-  test('24. Production environment strictly blocks sandbox simulation regardless of PHONEPE settings', () => {
-    const isSandboxEnvironment = (nodeEnv: string, phonepeEnv?: string, merchantId?: string) =>
-      nodeEnv !== 'production' &&
-      (phonepeEnv === 'UAT' || phonepeEnv === 'SANDBOX' || !merchantId);
+  test('24. Production environment strictly blocks sandbox simulation', () => {
+    const isSandboxEnvironment = (nodeEnv: string) => nodeEnv !== 'production';
 
-    // In production with SANDBOX set, sandbox simulation must still be FALSE
-    assert.equal(isSandboxEnvironment('production', 'SANDBOX', 'MID123'), false);
-    assert.equal(isSandboxEnvironment('production', undefined, undefined), false);
+    // In production, sandbox simulation must still be FALSE
+    assert.equal(isSandboxEnvironment('production'), false);
 
     // In development, sandbox simulation is TRUE
-    assert.equal(isSandboxEnvironment('development', 'SANDBOX', undefined), true);
+    assert.equal(isSandboxEnvironment('development'), true);
   });
 
   // TEST 25: CSRF Origin validation on state-changing API endpoints
@@ -803,5 +804,89 @@ describe('Raas in Taal — Strict Security, Capacity & QR Gate Pass Test Suite',
     assert.equal(isTrusted('http://localhost:3000', 'localhost:3000'), true);
     assert.equal(isTrusted('https://evil-attacker.com', 'api.raasintaal.in'), false);
     assert.equal(isTrusted('https://raasintaal.in.fake.com', 'api.raasintaal.in'), false);
+  });
+
+  // TEST 38: Payment Replay Protection Across Multiple Bookings
+  test('38. Replaying an already-confirmed Razorpay payment ID on a different order is strictly rejected', async () => {
+    const resA = await db.createReservation({
+      categoryCode: 'couple',
+      quantity: 1,
+      customerName: 'User A',
+      customerEmail: 'usera@example.com',
+      customerPhone: '9876543210',
+    });
+    const resB = await db.createReservation({
+      categoryCode: 'family',
+      quantity: 1,
+      customerName: 'User B',
+      customerEmail: 'userb@example.com',
+      customerPhone: '9876543211',
+    });
+
+    const payId = 'pay_shared_replay_test_101';
+    const confA = await db.confirmPaymentAndIssuePass({
+      orderId: resA.order!.id,
+      razorpayPaymentId: payId,
+    });
+    assert.equal(confA.success, true);
+    assert.ok(confA.pass);
+
+    // Attacker attempts to confirm Order B using User A's payment ID
+    const confB = await db.confirmPaymentAndIssuePass({
+      orderId: resB.order!.id,
+      razorpayPaymentId: payId,
+    });
+    assert.equal(confB.success, false);
+    assert.equal(confB.error, 'RAZORPAY_PAYMENT_ALREADY_USED');
+    assert.notEqual(db.getOrderByReference(resB.order!.orderReference)?.paymentStatus, 'SUCCESS');
+  });
+
+  // TEST 39: Production Mode Enforces Explicit Staff PIN and Blocks Fallback
+  test('39. Production mode strictly rejects default fallback PIN if STAFF_PIN is unset', () => {
+    const origEnv = process.env.NODE_ENV;
+    const origPin = process.env.STAFF_PIN;
+
+    try {
+      (process.env as any).NODE_ENV = 'production';
+      delete process.env.STAFF_PIN;
+
+      const expectedPin = process.env.STAFF_PIN || (process.env.NODE_ENV === 'production' ? '' : '202618');
+      assert.equal(expectedPin, '', 'Expected PIN must be empty string in production when unconfigured');
+
+      // safeCompare against dev PIN must fail
+      assert.equal(safeCompare('202618', expectedPin), false);
+    } finally {
+      (process.env as any).NODE_ENV = origEnv;
+      if (origPin) process.env.STAFF_PIN = origPin;
+    }
+  });
+
+  // TEST 40: Razorpay Order ID Binding
+  test('40. attachRazorpayOrderId binds unique Razorpay order ID to internal booking', async () => {
+    const res = await db.createReservation({
+      categoryCode: 'stag_girls',
+      quantity: 1,
+      customerName: 'Pooja Patel',
+      customerEmail: 'pooja@example.com',
+      customerPhone: '9876543210',
+    });
+    assert.equal(res.success, true);
+    const order = res.order!;
+
+    const rzpOrderId = `order_${order.orderReference}_98765`;
+    db.attachRazorpayOrderId(order.id, rzpOrderId);
+
+    const updated = db.getOrderByReference(order.orderReference);
+    assert.equal(updated?.razorpayOrderId, rzpOrderId);
+  });
+
+  // TEST 41: Storage Engine Does Not Leave Leaked Temporary Files
+  test('41. Storage save operations clean up all temporary files', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const cwd = process.cwd();
+
+    const tmpFiles = fs.readdirSync(cwd).filter((f: string) => f.startsWith('.db_state.json.') && f.endsWith('.tmp'));
+    assert.equal(tmpFiles.length, 0, 'No orphaned .tmp files should exist in workspace root');
   });
 });

@@ -91,6 +91,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (order) {
+      // Security Check: If internal order already has a registered razorpayOrderId, ensure strict binding
+      if (order.razorpayOrderId && order.razorpayOrderId !== orderId) {
+        return NextResponse.json(
+          { error: 'Security violation: Razorpay order ID does not match internal booking reservation' },
+          { status: 400 }
+        );
+      }
+
       if (order.paymentStatus === 'SUCCESS') {
         const pass = db.getPassByOrderId(order.id);
         orderDetails = order;

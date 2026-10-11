@@ -7,7 +7,7 @@ import FloatingPetalsAndParticles from '@/components/FloatingPetalsAndParticles'
 export const metadata: Metadata = {
   title: 'Raas in Taal 2026 — Dandiya Night by Chaos and Chill | Jaipur',
   description:
-    'Join Raas in Taal on Sunday, 18 October 2026 at Khelcity Multi-Sports Arena, Jagatpura, Jaipur. Official ticket booking with PhonePe integration and instant QR gate passes.',
+    'Join Raas in Taal on Sunday, 18 October 2026 at Khelcity Multi-Sports Arena, Jagatpura, Jaipur. Official ticket booking with instant QR gate passes and secure Razorpay checkout.',
   keywords: [
     'Raas in Taal',
     'Dandiya Night Jaipur',

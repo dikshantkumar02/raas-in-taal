@@ -92,6 +92,17 @@ class EventStore {
   private checkIns: CheckInRecord[] = [];
   private idempotencyLogs: Map<string, PaymentIdempotency> = new Map();
   private customers: Map<string, Customer> = new Map(); // email -> Customer
+  private passwordResetChallenges: Map<
+    string,
+    {
+      email: string;
+      otpHash: string;
+      expiresAt: Date;
+      attempts: number;
+      createdAt: Date;
+      lastSentAt: Date;
+    }
+  > = new Map();
   private staffAccounts: Map<string, StaffAccount> = new Map(); // id -> StaffAccount
   private staffByUsername: Map<string, string> = new Map(); // username -> id
 
@@ -136,8 +147,8 @@ class EventStore {
             reservationExpiresAt: new Date(row.reservation_expires_at),
             createdAt: new Date(row.created_at),
             updatedAt: new Date(row.updated_at),
-            phonepeTransactionId: row.phonepe_transaction_id,
-            phonepeProviderReference: row.phonepe_provider_reference,
+            customerId: row.customer_id,
+            razorpayOrderId: row.razorpay_order_id,
             paidAt: row.paid_at ? new Date(row.paid_at) : undefined,
           };
           this.orders.set(ord.id, ord);
@@ -260,6 +271,7 @@ class EventStore {
   }
 
   private saveToDisk(): void {
+    const tmpPath = `${this.persistPath}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
     try {
       const state = {
         orders: Array.from(this.orders.entries()),
@@ -269,10 +281,18 @@ class EventStore {
         customers: Array.from(this.customers.entries()),
         staffAccounts: Array.from(this.staffAccounts.entries()),
       };
-      const tmpPath = `${this.persistPath}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
-      fs.renameSync(tmpPath, this.persistPath);
-    } catch { }
+      try {
+        fs.renameSync(tmpPath, this.persistPath);
+      } catch {
+        fs.copyFileSync(tmpPath, this.persistPath);
+        try { fs.unlinkSync(tmpPath); } catch {}
+      }
+    } catch {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {}
+    }
   }
 
   private loadFromDisk(): void {
@@ -410,6 +430,7 @@ class EventStore {
     groupFemaleVerified?: boolean;
     expiryMinutes?: number;
     customReference?: string;
+    customerId?: string;
   }): Promise<{
     success: boolean;
     order?: Order;
@@ -460,6 +481,14 @@ class EventStore {
       const expiryMinutes = params.expiryMinutes || 10;
       const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000);
 
+      let resolvedCustomerId = params.customerId;
+      if (!resolvedCustomerId) {
+        const existingCust = this.customers.get(params.customerEmail.trim().toLowerCase());
+        if (existingCust) {
+          resolvedCustomerId = existingCust.id;
+        }
+      }
+
       const newOrder: Order = {
         id: orderId,
         orderReference: orderRef,
@@ -471,6 +500,7 @@ class EventStore {
         customerName: params.customerName.trim(),
         customerEmail: params.customerEmail.trim().toLowerCase(),
         customerPhone: params.customerPhone.trim(),
+        customerId: resolvedCustomerId,
         attendeeDetails: params.attendeeDetails || [],
         groupFemaleVerified: Boolean(params.groupFemaleVerified),
         paymentStatus: 'RESERVED',
@@ -497,6 +527,7 @@ class EventStore {
             customer_name: params.customerName.trim(),
             customer_email: params.customerEmail.trim().toLowerCase(),
             customer_phone: params.customerPhone.trim(),
+            customer_id: resolvedCustomerId,
             attendee_details: params.attendeeDetails || [],
             group_female_verified: Boolean(params.groupFemaleVerified),
             payment_status: 'RESERVED',
@@ -515,6 +546,50 @@ class EventStore {
         order: { ...newOrder },
       };
     });
+  }
+
+  public attachRazorpayOrderId(orderId: string, razorpayOrderId: string): void {
+    const order = this.orders.get(orderId);
+    if (order) {
+      order.razorpayOrderId = razorpayOrderId;
+      order.updatedAt = new Date();
+      this.saveToDisk();
+      if (supabaseAdmin) {
+        supabaseAdmin
+          .from('orders')
+          .update({
+            razorpay_order_id: razorpayOrderId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', orderId)
+          .then(
+            () => {},
+            (err: unknown) => console.warn('[Supabase Order Update Warning]', err)
+          );
+      }
+    }
+  }
+
+  public attachPhonePeTransactionId(orderId: string, phonepeTransactionId: string): void {
+    const order = this.orders.get(orderId);
+    if (order) {
+      order.phonepeTransactionId = phonepeTransactionId;
+      order.updatedAt = new Date();
+      this.saveToDisk();
+      if (supabaseAdmin) {
+        supabaseAdmin
+          .from('orders')
+          .update({
+            phonepe_transaction_id: phonepeTransactionId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', orderId)
+          .then(
+            () => {},
+            (err: unknown) => console.warn('[Supabase Order Update Warning]', err)
+          );
+      }
+    }
   }
 
   // 3. PAYMENT CONFIRMATION & PASS ISSUANCE
@@ -550,6 +625,31 @@ class EventStore {
           order: { ...order },
           pass: existingPass ? { ...existingPass } : undefined,
         };
+      }
+
+      // Security: Prevent replay of previously confirmed payment / transaction ID across different orders
+      if (params.phonepeTransactionId) {
+        for (const existingOrder of this.orders.values()) {
+          if (
+            existingOrder.id !== order.id &&
+            existingOrder.paymentStatus === 'SUCCESS' &&
+            existingOrder.phonepeTransactionId === params.phonepeTransactionId
+          ) {
+            return { success: false, error: 'PHONEPE_TRANSACTION_ALREADY_USED' };
+          }
+        }
+      }
+
+      if (params.razorpayPaymentId) {
+        for (const existingOrder of this.orders.values()) {
+          if (
+            existingOrder.id !== order.id &&
+            existingOrder.paymentStatus === 'SUCCESS' &&
+            existingOrder.razorpayPaymentId === params.razorpayPaymentId
+          ) {
+            return { success: false, error: 'RAZORPAY_PAYMENT_ALREADY_USED' };
+          }
+        }
       }
 
       const now = new Date();
@@ -1035,12 +1135,14 @@ class EventStore {
     return safe;
   }
 
-  public getCustomerBookings(email: string) {
-    const cleanEmail = email.trim().toLowerCase();
+  public getCustomerBookings(emailOrId: string) {
+    const clean = emailOrId.trim().toLowerCase();
     const results: Array<Order & { passQrToken?: string }> = [];
 
     for (const order of this.orders.values()) {
-      if (order.customerEmail.toLowerCase() === cleanEmail) {
+      const matchId = order.customerId && order.customerId.toLowerCase() === clean;
+      const matchEmail = order.customerEmail.toLowerCase() === clean;
+      if (matchId || matchEmail) {
         const passId = this.passesByOrderId.get(order.id);
         const pass = passId ? this.passes.get(passId) : undefined;
         results.push({
@@ -1051,6 +1153,114 @@ class EventStore {
     }
 
     return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  public linkCustomerBookings(customerId: string, email: string): number {
+    const cleanEmail = email.trim().toLowerCase();
+    let linkedCount = 0;
+
+    for (const order of this.orders.values()) {
+      if (order.customerEmail.toLowerCase() === cleanEmail && order.customerId !== customerId) {
+        order.customerId = customerId;
+        order.updatedAt = new Date();
+        linkedCount++;
+        if (supabaseAdmin) {
+          supabaseAdmin
+            .from('orders')
+            .update({ customer_id: customerId, updated_at: new Date().toISOString() })
+            .eq('id', order.id)
+            .then(
+              () => {},
+              (err: unknown) => console.warn('[Supabase Link Warning]', err)
+            );
+        }
+      }
+    }
+
+    if (linkedCount > 0) {
+      this.saveToDisk();
+    }
+    return linkedCount;
+  }
+
+  public createPasswordResetOtp(email: string, otp: string): { success: boolean; cooldownRemaining?: number } {
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = this.passwordResetChallenges.get(cleanEmail);
+    const now = Date.now();
+
+    if (existing) {
+      const elapsed = Math.floor((now - existing.lastSentAt.getTime()) / 1000);
+      if (elapsed < 60) {
+        return { success: false, cooldownRemaining: 60 - elapsed };
+      }
+    }
+
+    this.passwordResetChallenges.set(cleanEmail, {
+      email: cleanEmail,
+      otpHash: hashToken(otp),
+      expiresAt: new Date(now + 5 * 60 * 1000), // 5 minutes
+      attempts: 0,
+      createdAt: new Date(now),
+      lastSentAt: new Date(now),
+    });
+
+    return { success: true };
+  }
+
+  public verifyAndConsumePasswordResetOtp(email: string, otp: string): { success: boolean; error?: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    const challenge = this.passwordResetChallenges.get(cleanEmail);
+
+    if (!challenge) {
+      return { success: false, error: 'No active password recovery request found or code has expired. Please request a new code.' };
+    }
+
+    if (challenge.expiresAt.getTime() < Date.now()) {
+      this.passwordResetChallenges.delete(cleanEmail);
+      return { success: false, error: 'The verification code has expired (valid for 5 minutes). Please request a new code.' };
+    }
+
+    if (challenge.attempts >= 5) {
+      this.passwordResetChallenges.delete(cleanEmail);
+      return { success: false, error: 'Too many incorrect attempts. For security, please request a new verification code.' };
+    }
+
+    challenge.attempts++;
+
+    const incomingHash = hashToken(otp.trim());
+    if (!safeCompare(incomingHash, challenge.otpHash)) {
+      const remaining = 5 - challenge.attempts;
+      return {
+        success: false,
+        error: remaining > 0 ? `Invalid verification code. ${remaining} attempt(s) remaining.` : 'Too many incorrect attempts. Please request a new code.',
+      };
+    }
+
+    // Success: invalidate challenge immediately
+    this.passwordResetChallenges.delete(cleanEmail);
+    return { success: true };
+  }
+
+  public updateCustomerPassword(email: string, newPassword: string): boolean {
+    const cleanEmail = email.trim().toLowerCase();
+    const customer = this.customers.get(cleanEmail);
+    if (!customer) return false;
+
+    customer.passwordHash = hashPassword(newPassword);
+    this.saveToDisk();
+
+    if (supabaseAdmin) {
+      supabaseAdmin
+        .from('customers')
+        .update({ password_hash: customer.passwordHash })
+        .eq('email', cleanEmail)
+        .then(
+          () => {},
+          (err: unknown) => console.warn('[Supabase Password Update Warning]', err)
+        );
+    }
+
+    return true;
   }
 
   // 6. STAFF PORTAL AUTHENTICATION & MANAGEMENT
@@ -1075,10 +1285,10 @@ class EventStore {
       return { success: false, error: 'Staff account has been revoked or deactivated.' };
     }
 
-    const expectedPin = process.env.STAFF_PIN || '202618';
+    const expectedPin = process.env.STAFF_PIN || (process.env.NODE_ENV === 'production' ? '' : '202618');
     const isValidPin =
       verifyPassword(pin, staff.pinHash) ||
-      safeCompare(pin, expectedPin);
+      (expectedPin ? safeCompare(pin, expectedPin) : false);
 
     if (!isValidPin) {
       return { success: false, error: 'Invalid Staff PIN.' };
@@ -1179,6 +1389,7 @@ class EventStore {
     this.passesByOrderId.clear();
     this.checkIns = [];
     this.idempotencyLogs.clear();
+    this.passwordResetChallenges.clear();
     this.customers.clear();
     this.staffAccounts.clear();
     this.staffByUsername.clear();

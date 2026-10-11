@@ -44,6 +44,7 @@ export interface Order {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
+  customerId?: string;
   attendeeDetails: Array<{ name: string; gender?: string; relation?: string }>;
   groupFemaleVerified: boolean;
   paymentStatus: PaymentStatus;

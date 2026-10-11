@@ -263,3 +263,121 @@ export async function sendTicketConfirmationEmail(params: {
 export function getEmailDeliveryStatus(orderId: string): EmailDeliveryRecord | undefined {
   return emailDeliveryLog.get(orderId);
 }
+
+/**
+ * Sends a password reset OTP verification code.
+ * Safe & time-bound: 5-minute expiry with security warnings.
+ */
+export async function sendPasswordResetOtpEmail(params: {
+  email: string;
+  otp: string;
+}): Promise<{ success: boolean; status: 'SENT' | 'FAILED' | 'MOCKED'; provider?: string; error?: string }> {
+  const { email, otp } = params;
+  const safeEmail = escapeHtml(email);
+  const safeOtp = escapeHtml(otp);
+
+  const emailHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Password Reset Code — Raas in Taal</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0F0205; color: #FAF7F2; margin: 0; padding: 24px; }
+        .card { max-width: 520px; margin: 0 auto; background: #1C050A; border: 1px solid #D8A743; border-radius: 20px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        .logo { color: #D8A743; font-size: 22px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; text-align: center; margin-bottom: 24px; }
+        .otp-box { background: #0A0103; border: 2px dashed #E59837; border-radius: 14px; padding: 20px; text-align: center; margin: 24px 0; }
+        .otp-code { font-family: monospace; font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #FFCC66; }
+        .warning { font-size: 12px; color: #E89088; background: rgba(180, 20, 20, 0.15); border-left: 3px solid #E8505B; padding: 10px 14px; border-radius: 6px; margin: 20px 0; line-height: 1.5; }
+        .footer { font-size: 11px; color: #8F7B7B; text-align: center; margin-top: 24px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="logo">Raas in Taal</div>
+        <h2 style="margin: 0 0 12px 0; font-size: 20px; color: #FAF7F2; text-align: center;">Password Reset Code</h2>
+        <p style="font-size: 14px; line-height: 1.6; color: #D4C5B9; margin: 0 0 16px 0;">
+          We received a request to reset the password for your account (<strong>${safeEmail}</strong>). Use the verification code below to complete your password reset:
+        </p>
+
+        <div class="otp-box">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #C8B9B0; margin-bottom: 6px;">Your 6-Digit OTP</div>
+          <div class="otp-code">${safeOtp}</div>
+          <div style="font-size: 12px; color: #D8A743; margin-top: 6px; font-weight: 600;">Valid for 5 minutes only</div>
+        </div>
+
+        <div class="warning">
+          <strong>Security Notice:</strong> Never share this code with anyone. Raas in Taal staff or organizers will never ask for your password or OTP.
+        </div>
+
+        <p style="font-size: 12px; color: #A8958E; margin: 0;">
+          If you did not request this password reset, you can safely ignore this email. Your current password remains secure.
+        </p>
+
+        <div class="footer">
+          &copy; 2026 Raas in Taal &bull; Chaos and Chill &bull; Jaipur, Rajasthan
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const apiKey = process.env.RESEND_API_KEY;
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+
+  // 1. Try Resend if configured
+  if (apiKey) {
+    try {
+      const resend = new Resend(apiKey);
+      const rawFrom = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+      const fromName = (process.env.EMAIL_FROM_NAME || 'Raas in Taal').replace(/['"]/g, '').trim();
+      const formattedFrom = rawFrom.includes('<') ? rawFrom : `${fromName} <${rawFrom}>`;
+
+      const response = await resend.emails.send({
+        from: formattedFrom,
+        to: [email],
+        subject: `Password Reset Verification Code — Raas in Taal`,
+        html: emailHtml,
+      });
+
+      if (!response.error && response.data?.id) {
+        return { success: true, status: 'SENT', provider: 'resend' };
+      }
+
+      console.warn(`[Resend OTP] Warning for ${email}:`, response.error?.message);
+    } catch (err: any) {
+      console.error(`[Resend OTP] Error for ${email}:`, err.message);
+    }
+  }
+
+  // 2. Try Gmail SMTP if configured
+  if (gmailUser && gmailPass) {
+    try {
+      const nodemailer = await import('nodemailer');
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: gmailUser, pass: gmailPass },
+      });
+
+      await transporter.sendMail({
+        from: `"Raas in Taal — Dandiya Night" <${gmailUser}>`,
+        to: email,
+        subject: `Password Reset Verification Code — Raas in Taal`,
+        html: emailHtml,
+      });
+
+      return { success: true, status: 'SENT', provider: 'gmail_fallback' };
+    } catch (err: any) {
+      console.error(`[Gmail OTP] Error for ${email}:`, err.message);
+    }
+  }
+
+  // 3. Fallback for testing / dev environment
+  if (process.env.NODE_ENV !== 'production') {
+    console.info(`[Dev OTP Mock] Password reset code for ${email}: ${otp}`);
+    return { success: true, status: 'MOCKED', provider: 'dev_mock' };
+  }
+
+  return { success: false, status: 'FAILED', error: 'No email service credentials configured' };
+}

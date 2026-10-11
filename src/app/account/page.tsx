@@ -16,7 +16,9 @@ import {
   ArrowRight, 
   LogOut, 
   Sparkles,
-  ExternalLink,
+  RefreshCw,
+  KeyRound,
+  ArrowLeft,
   Loader2
 } from 'lucide-react';
 
@@ -45,7 +47,7 @@ function AccountContent() {
   const router = useRouter();
   const redirectUrl = searchParams.get('redirect');
 
-  const [tab, setTab] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
+  const [tab, setTab] = useState<'LOGIN' | 'SIGNUP' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD'>('LOGIN');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [user, setUser] = useState<CustomerUser | null>(null);
@@ -53,11 +55,27 @@ function AccountContent() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Form states
+  // Login / Registration Form states
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+
+  // Password Recovery states
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Countdown timer for OTP resend
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
 
   const fetchSession = async () => {
     try {
@@ -125,6 +143,110 @@ function AccountContent() {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoveryEmail.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok && res.status !== 429) {
+        setError(data.error || 'Failed to send verification code.');
+      } else if (res.status === 429) {
+        setError(data.error || 'Too many requests. Please wait.');
+      } else {
+        setSuccessMsg(data.message || 'Verification code sent to your email.');
+        setTab('RESET_PASSWORD');
+        setResendCooldown(60);
+      }
+    } catch {
+      setError('Network connection error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || !recoveryEmail) return;
+    setError('');
+    setSuccessMsg('');
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoveryEmail.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to resend verification code.');
+      } else {
+        setSuccessMsg('A new 6-digit verification code has been dispatched.');
+        setResendCooldown(60);
+      }
+    } catch {
+      setError('Network connection error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match. Please verify both fields.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: recoveryEmail.trim(),
+          otp: otp.trim(),
+          newPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || 'Password reset failed. Invalid or expired code.');
+      } else {
+        setSuccessMsg('Password updated successfully! You can now sign in with your new password.');
+        setTab('LOGIN');
+        setEmail(recoveryEmail);
+        setPassword('');
+        setOtp('');
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+    } catch {
+      setError('Network connection error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
@@ -175,6 +297,13 @@ function AccountContent() {
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
+            <button
+              onClick={() => fetchSession()}
+              className="p-2.5 rounded-xl border border-raas-gold/30 hover:border-raas-gold bg-black/40 text-raas-gold text-xs font-bold flex items-center justify-center transition-colors cursor-pointer"
+              title="Refresh booking history"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
             <Link
               href="/#tickets"
               className="flex-1 sm:flex-none gold-gradient-btn px-5 py-2.5 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5"
@@ -216,7 +345,7 @@ function AccountContent() {
               <span>Your Booking History</span>
             </h2>
             <span className="text-xs text-raas-cream/60 font-mono">
-              Live Gateway Status
+              Persistent &amp; Verified
             </span>
           </div>
 
@@ -226,7 +355,7 @@ function AccountContent() {
               <div className="space-y-1">
                 <h3 className="text-lg font-bold text-raas-cream">No Bookings Found Yet</h3>
                 <p className="text-xs text-raas-cream/70 max-w-sm mx-auto">
-                  Bookings made with {user.email} will automatically appear here with their QR passes and live status.
+                  Bookings made with {user.email} are permanently stored in our secure database and will appear here with instant QR passes.
                 </p>
               </div>
               <Link
@@ -267,7 +396,7 @@ function AccountContent() {
                           {isSuccess && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-[11px] font-bold text-emerald-400">
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              SUCCESS / CONFIRMED
+                              CONFIRMED &amp; ISSUED
                             </span>
                           )}
 
@@ -340,7 +469,220 @@ function AccountContent() {
     );
   }
 
-  // LOGIN / SIGNUP FORM
+  // ─────────────────────────────────────────────────────────────
+  // FORGOT PASSWORD / OTP RECOVERY FORM
+  // ─────────────────────────────────────────────────────────────
+  if (tab === 'FORGOT_PASSWORD') {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16">
+        <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 shadow-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full bg-raas-marigold/20 border border-raas-gold/30 text-raas-gold flex items-center justify-center mx-auto">
+              <KeyRound className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-black gold-gradient-text tracking-wide">
+              Recover Password
+            </h1>
+            <p className="text-xs text-raas-cream/70 leading-relaxed">
+              Enter your registered email address. We will generate and send a secure 6-digit OTP to reset your password.
+            </p>
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
+                Registered Email Address
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-raas-cream/40 absolute left-3 top-3.5" />
+                <input
+                  type="email"
+                  required
+                  value={recoveryEmail}
+                  onChange={(e) => setRecoveryEmail(e.target.value)}
+                  placeholder="your.email@example.com"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream placeholder:text-raas-cream/30 focus:border-raas-gold focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 rounded-xl gold-gradient-btn text-xs font-bold flex items-center justify-center gap-2 shadow-lg cursor-pointer mt-2"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Generating Code...</span>
+                </>
+              ) : (
+                <span>Send Verification Code</span>
+              )}
+            </button>
+          </form>
+
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => { setTab('LOGIN'); setError(''); setSuccessMsg(''); }}
+              className="text-xs text-amber-300/80 hover:text-amber-200 inline-flex items-center gap-1.5 font-semibold cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign In</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // RESET PASSWORD OTP & NEW PASSWORD FORM
+  // ─────────────────────────────────────────────────────────────
+  if (tab === 'RESET_PASSWORD') {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16">
+        <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 shadow-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full bg-raas-marigold/20 border border-raas-gold/30 text-raas-gold flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-black gold-gradient-text tracking-wide">
+              Set New Password
+            </h1>
+            <p className="text-xs text-raas-cream/70 leading-relaxed">
+              Enter the 6-digit OTP code sent to <strong>{recoveryEmail}</strong> and choose your new password.
+            </p>
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
+                  6-Digit Verification Code
+                </label>
+                <button
+                  type="button"
+                  disabled={resendCooldown > 0 || submitting}
+                  onClick={handleResendOtp}
+                  className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
+                </button>
+              </div>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                className="w-full text-center tracking-[8px] font-mono font-black text-lg py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-amber-300 placeholder:text-raas-cream/20 focus:border-raas-gold focus:outline-none"
+              />
+              <span className="text-[10px] text-amber-200/60 block text-center">
+                Valid for 5 minutes only
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
+                New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-raas-cream/40 absolute left-3 top-3.5" />
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream placeholder:text-raas-cream/30 focus:border-raas-gold focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
+                Confirm New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-raas-cream/40 absolute left-3 top-3.5" />
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 text-xs text-raas-cream placeholder:text-raas-cream/30 focus:border-raas-gold focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 rounded-xl gold-gradient-btn text-xs font-bold flex items-center justify-center gap-2 shadow-lg cursor-pointer mt-2"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Updating Password...</span>
+                </>
+              ) : (
+                <span>Update Password &amp; Sign In</span>
+              )}
+            </button>
+          </form>
+
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => { setTab('LOGIN'); setError(''); setSuccessMsg(''); }}
+              className="text-xs text-amber-300/80 hover:text-amber-200 inline-flex items-center gap-1.5 font-semibold cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign In</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // LOGIN / SIGNUP FORM (Default Attendee Portal)
+  // ─────────────────────────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto px-4 py-16">
       <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 shadow-2xl space-y-6">
@@ -363,7 +705,7 @@ function AccountContent() {
         <div className="flex rounded-xl bg-[#140207] p-1 border border-raas-gold/20">
           <button
             type="button"
-            onClick={() => { setTab('LOGIN'); setError(''); }}
+            onClick={() => { setTab('LOGIN'); setError(''); setSuccessMsg(''); }}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
               tab === 'LOGIN'
                 ? 'gold-gradient-btn'
@@ -374,7 +716,7 @@ function AccountContent() {
           </button>
           <button
             type="button"
-            onClick={() => { setTab('SIGNUP'); setError(''); }}
+            onClick={() => { setTab('SIGNUP'); setError(''); setSuccessMsg(''); }}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
               tab === 'SIGNUP'
                 ? 'gold-gradient-btn'
@@ -457,9 +799,25 @@ function AccountContent() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
-              Password
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
+                Password
+              </label>
+              {tab === 'LOGIN' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecoveryEmail(email);
+                    setTab('FORGOT_PASSWORD');
+                    setError('');
+                    setSuccessMsg('');
+                  }}
+                  className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 hover:underline cursor-pointer"
+                >
+                  Forgot Password?
+                </button>
+              )}
+            </div>
             <div className="relative">
               <Lock className="w-4 h-4 text-raas-cream/40 absolute left-3 top-3.5" />
               <input
@@ -491,7 +849,7 @@ function AccountContent() {
         </form>
 
         <p className="text-[11px] text-center text-raas-cream/60">
-          Tip: Use the same email you entered during ticket booking to view your passes.
+          Tip: Your tickets and QR passes remain accessible on this account permanently.
         </p>
       </div>
     </div>

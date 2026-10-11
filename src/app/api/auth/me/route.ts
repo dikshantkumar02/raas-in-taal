@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    const bookings = db.getCustomerBookings(email);
+    db.linkCustomerBookings(customer.id, customer.email);
+    const bookings = db.getCustomerBookings(customer.id);
 
     return NextResponse.json({
       authenticated: true,

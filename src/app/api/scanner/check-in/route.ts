@@ -61,10 +61,10 @@ export async function POST(req: NextRequest) {
 
     if (!authenticatedStaff) {
       const authPin = req.headers.get('x-staff-pin') || '';
-      const expectedPin = process.env.STAFF_PIN || '202618';
+      const expectedPin = process.env.STAFF_PIN || (process.env.NODE_ENV === 'production' ? '' : '202618');
 
       // Fallback PIN authorization check using constant-time comparison
-      if (!authPin || !safeCompare(authPin, expectedPin)) {
+      if (!authPin || !expectedPin || !safeCompare(authPin, expectedPin)) {
         recordFailedAttempt(pinLockoutKey, 5, 15 * 60 * 1000);
         return NextResponse.json(
           { success: false, error: 'UNAUTHORIZED_STAFF', message: 'Unauthorized staff access. Please enter valid Staff PIN or sign in.' },

@@ -88,6 +88,23 @@ export async function POST(req: NextRequest) {
       }
 
       if (order && order.paymentStatus !== 'SUCCESS') {
+        // Security Check 1: Order ID binding
+        if (order.razorpayOrderId && orderId && order.razorpayOrderId !== orderId) {
+          return NextResponse.json(
+            { error: 'Razorpay order ID mismatch between webhook payload and internal booking' },
+            { status: 400 }
+          );
+        }
+
+        // Security Check 2: Underpayment prevention
+        const capturedAmount = Number(paymentEntity?.amount || orderEntity?.amount_paid || 0);
+        if (capturedAmount > 0 && order.amountPaise && capturedAmount < order.amountPaise) {
+          return NextResponse.json(
+            { error: 'Payment amount mismatch: underpayment rejected' },
+            { status: 400 }
+          );
+        }
+
         const confirmation = await db.confirmPaymentAndIssuePass({
           orderId: order.id,
           razorpayOrderId: orderId,

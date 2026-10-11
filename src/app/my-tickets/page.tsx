@@ -106,6 +106,19 @@ export default function MyTicketsPage() {
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
+
+        <div className="pt-4 border-t border-raas-gold/20 text-center space-y-1">
+          <p className="text-xs text-raas-cream/70">
+            Have an account or want to view all your passes?
+          </p>
+          <Link
+            href="/account"
+            className="text-xs text-amber-300 font-bold hover:underline inline-flex items-center gap-1"
+          >
+            <span>Open Attendee Dashboard &amp; Booking History</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </div>
     </div>
   );

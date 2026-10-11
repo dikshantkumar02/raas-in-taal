@@ -101,7 +101,7 @@ export default function BookingStatusPage({
       {loading ? (
         <div className="p-12 text-center rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 space-y-4">
           <Loader2 className="w-8 h-8 text-raas-gold animate-spin mx-auto" />
-          <p className="text-sm text-raas-cream font-medium">Verifying payment status with PhonePe...</p>
+          <p className="text-sm text-raas-cream font-medium">Verifying payment status with Razorpay...</p>
         </div>
       ) : orderStatus === 'SUCCESS' ? (
         <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/40 space-y-6 text-center shadow-2xl">
@@ -178,7 +178,7 @@ export default function BookingStatusPage({
           <div className="space-y-2">
             <h2 className="text-xl font-bold text-raas-cream">Payment In Progress / Pending</h2>
             <p className="text-xs text-raas-cream/70 max-w-md mx-auto">
-              {message || 'Your reservation is being held. Please complete the PhonePe transaction to receive your gate pass.'}
+              {message || 'Your reservation is being held. Please complete the transaction to receive your gate pass.'}
             </p>
           </div>
 
@@ -186,17 +186,17 @@ export default function BookingStatusPage({
           {isSandboxMode && (
             <div className="p-4 rounded-2xl bg-raas-maroon-dark border border-raas-gold/30 max-w-md mx-auto space-y-3">
               <span className="text-[11px] font-bold text-raas-gold uppercase tracking-wider block">
-                PhonePe UAT Sandbox Testing
+                Sandbox Mode Testing
               </span>
               <p className="text-[11px] text-raas-cream/70">
-                You are testing in PhonePe Sandbox mode. Click below to simulate PhonePe verified payment capture:
+                You are testing in Sandbox mode. Click below to simulate verified payment capture:
               </p>
               <button
                 onClick={() => verifyPayment(true)}
                 className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Simulate Successful UAT Payment Capture</span>
+                <span>Simulate Successful Payment Capture</span>
               </button>
             </div>
           )}

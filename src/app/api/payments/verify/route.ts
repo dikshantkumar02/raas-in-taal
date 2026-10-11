@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
-import { checkPhonePePaymentStatus } from '@/lib/payments/phonepe';
 import { verifyRazorpaySignature } from '@/lib/payments/razorpay';
 import { sendTicketConfirmationEmail } from '@/lib/email/service';
 import { checkRateLimit, getClientIp } from '@/lib/security/crypto';
@@ -17,17 +16,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { orderReference, transactionId, simulateSuccess, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
+    const { orderReference, simulateSuccess, razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
 
     if (!orderReference) {
       return NextResponse.json({ error: 'Order reference is required' }, { status: 400 });
     }
 
-    const isSandboxEnvironment =
-      process.env.NODE_ENV !== 'production' &&
-      (process.env.PHONEPE_ENV === 'UAT' ||
-        process.env.PHONEPE_ENV === 'SANDBOX' ||
-        !process.env.PHONEPE_MERCHANT_ID);
+    const isSandboxEnvironment = process.env.NODE_ENV !== 'production';
 
     let order = await db.getOrderByReferenceAsync(orderReference);
     if (!order && simulateSuccess && isSandboxEnvironment) {
@@ -77,9 +72,15 @@ export async function POST(req: NextRequest) {
     }
 
     let isPaymentValid = false;
-    let providerRef = transactionId || razorpay_payment_id || 'UAT_REF';
+    let providerRef = razorpay_payment_id || 'RZP_REF';
 
     if (razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      if (order.razorpayOrderId && order.razorpayOrderId !== razorpay_order_id) {
+        return NextResponse.json(
+          { error: 'Security violation: Razorpay order ID does not match internal booking reservation' },
+          { status: 400 }
+        );
+      }
       const isValid = verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
       if (!isValid) {
         return NextResponse.json(
@@ -90,22 +91,8 @@ export async function POST(req: NextRequest) {
       isPaymentValid = true;
       providerRef = razorpay_payment_id;
     } else if (simulateSuccess && isSandboxEnvironment) {
-      // Sandbox simulation bypasses external PhonePe network call only in development / UAT
       isPaymentValid = true;
-      providerRef = transactionId || `SIM_CAPTURED_${Date.now()}`;
-    } else if (transactionId) {
-      // Authoritative verification against PhonePe server API
-      const statusRes = await checkPhonePePaymentStatus(transactionId);
-      if (statusRes.success && statusRes.status === 'PAYMENT_SUCCESS') {
-        if (statusRes.amountPaise && statusRes.amountPaise !== order.amountPaise) {
-          return NextResponse.json(
-            { error: 'Payment amount mismatch between gateway and order' },
-            { status: 400 }
-          );
-        }
-        isPaymentValid = true;
-        providerRef = statusRes.providerReferenceId || providerRef;
-      }
+      providerRef = `SIM_CAPTURED_${Date.now()}`;
     }
 
     if (!isPaymentValid) {
@@ -122,8 +109,8 @@ export async function POST(req: NextRequest) {
     // Confirm payment and issue 1 Gate Pass per booking
     const confirmation = await db.confirmPaymentAndIssuePass({
       orderId: order.id,
-      phonepeTransactionId: transactionId || `TXN_${Date.now()}`,
-      phonepeProviderReference: providerRef,
+      razorpayOrderId: razorpay_order_id || `order_sim_${Date.now()}`,
+      razorpayPaymentId: providerRef,
     });
 
     if (!confirmation.success || !confirmation.pass) {

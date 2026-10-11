@@ -75,14 +75,16 @@ function CheckoutContent() {
     ['stag_girls', 'couple', 'group', 'family'].includes(initialCat) ? initialCat : 'stag_girls'
   );
 
-  const [quantity, setQuantity] = useState(1);
+  const initialQty = parseInt(searchParams.get('quantity') || '1', 10);
+  const [quantity, setQuantity] = useState(isNaN(initialQty) || initialQty < 1 ? 1 : initialQty);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [groupFemaleVerified, setGroupFemaleVerified] = useState(false);
   const [attendeeNames, setAttendeeNames] = useState<string[]>(['']);
 
-  // Authentication State (Optional pre-fill from logged-in account)
+  // Authentication State (Mandatory before proceeding)
+  const [authChecking, setAuthChecking] = useState(true);
   const [customerUser, setCustomerUser] = useState<CustomerUser | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -91,7 +93,7 @@ function CheckoutContent() {
   const totalAttendees = catInfo.perTicket * quantity;
   const totalPrice = catInfo.price * quantity;
 
-  // Check customer session quietly in background without blocking the UI
+  // Enforce customer session: redirect unauthenticated users to login/signup
   const verifySession = async () => {
     try {
       const res = await fetch('/api/auth/me');
@@ -99,12 +101,18 @@ function CheckoutContent() {
         const data = await res.json();
         if (data.authenticated && data.customer) {
           setCustomerUser(data.customer);
-          setCustomerName((prev) => prev || data.customer.name);
-          setCustomerEmail((prev) => prev || data.customer.email);
-          setCustomerPhone((prev) => prev || data.customer.phone);
+          setCustomerName(data.customer.name || '');
+          setCustomerEmail(data.customer.email || '');
+          setCustomerPhone(data.customer.phone || '');
+          setAuthChecking(false);
+          return;
         }
       }
     } catch {}
+
+    // Unauthenticated: redirect to login/signup while preserving category & quantity
+    const returnUrl = `/checkout?category=${encodeURIComponent(category)}&quantity=${encodeURIComponent(quantity)}`;
+    router.replace(`/account?redirect=${encodeURIComponent(returnUrl)}`);
   };
 
   useEffect(() => {
@@ -346,6 +354,16 @@ function CheckoutContent() {
     }
   };
 
+  if (authChecking) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-10 h-10 text-amber-400 animate-spin" />
+        <p className="text-sm font-semibold text-amber-100">Checking your attendee account...</p>
+        <p className="text-xs text-amber-200/60">Verifying session before checkout</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
@@ -486,18 +504,21 @@ function CheckoutContent() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-amber-200 uppercase mb-1">
-                    Email Address (Instant QR Delivery) *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-amber-200 uppercase">
+                      Email Address *
+                    </label>
+                    <span className="text-[10px] text-emerald-400 font-mono">Verified Account</span>
+                  </div>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-amber-400/60 absolute left-3 top-3" />
+                    <Mail className="w-4 h-4 text-emerald-400/80 absolute left-3 top-3" />
                     <input
                       type="email"
                       required
+                      readOnly
                       value={customerEmail}
-                      onChange={(e) => setCustomerEmail(e.target.value)}
-                      placeholder="name@gmail.com"
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-black/60 border border-amber-400/30 text-xs text-white focus:outline-none focus:border-amber-400"
+                      title="Bound to your verified attendee account"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-black/80 border border-emerald-500/40 text-xs text-emerald-200/90 cursor-not-allowed focus:outline-none"
                     />
                   </div>
                 </div>

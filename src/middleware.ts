@@ -23,6 +23,7 @@ function isTrustedOrigin(origin: string, host: string): boolean {
     if (originUrl.host === host) return true;
     if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1') return true;
     if (originUrl.hostname === 'raasintaal.in' || originUrl.hostname.endsWith('.raasintaal.in')) return true;
+    if (originUrl.hostname === 'vercel.app' || originUrl.hostname.endsWith('.vercel.app')) return true;
 
     // Additional allowed origins from environment (e.g. custom hosting domains)
     const extraAllowed = (process.env.ALLOWED_ORIGINS || '')
@@ -47,7 +48,12 @@ export function middleware(req: NextRequest) {
   }
 
   // 2. Exploit Probe & Path Traversal Defense
-  const pathname = decodeURIComponent(url.pathname);
+  let pathname = url.pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return new NextResponse('Bad Request: Malformed URI', { status: 400 });
+  }
   for (const pattern of BLOCKED_PATH_PATTERNS) {
     if (pattern.test(pathname)) {
       return new NextResponse('Bad Request', { status: 400 });
