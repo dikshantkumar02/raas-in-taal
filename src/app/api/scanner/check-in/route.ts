@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    await db.ensureInitialized();
+
     // Authenticate staff via session token (cookie or header) or fallback PIN
     const authHeader = req.headers.get('authorization');
     const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
