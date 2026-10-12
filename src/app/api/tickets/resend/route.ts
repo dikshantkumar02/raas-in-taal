@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Booking reference and email are required.' }, { status: 400 });
     }
 
-    const order = db.getOrderByReference(bookingReference);
+    await db.ensureInitialized();
+    const order = await db.getOrderByReferenceAsync(bookingReference);
     if (!order) {
       return NextResponse.json({ error: 'No booking found matching this reference.' }, { status: 404 });
     }

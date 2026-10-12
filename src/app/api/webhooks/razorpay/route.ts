@@ -117,12 +117,16 @@ export async function POST(req: NextRequest) {
           const proto = req.headers.get('x-forwarded-proto') || 'http';
           const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
 
-          sendTicketConfirmationEmail({
-            order: confirmation.order,
-            pass: confirmation.pass,
-            event: db.getEventConfig(),
-            appBaseUrl: baseUrl,
-          }).catch(() => {});
+          try {
+            await sendTicketConfirmationEmail({
+              order: confirmation.order,
+              pass: confirmation.pass,
+              event: db.getEventConfig(),
+              appBaseUrl: baseUrl,
+            });
+          } catch (emailErr: any) {
+            console.warn('[RazorpayWebhook] Email dispatch error:', emailErr?.message || emailErr);
+          }
         }
       }
     }

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --dns-result-order=ipv4first -r tsx/cjs --test tests/auth_and_booking_persistence.test.ts tests/email.test.ts tests/razorpay.test.ts tests/security_and_capacity.test.ts",
+    "test": "node --dns-result-order=ipv4first -r tsx/cjs --test tests/auth_and_booking_persistence.test.ts tests/email.test.ts tests/razorpay.test.ts tests/security_and_capacity.test.ts tests/ticket_email_delivery.test.ts",
     "test:persistence": "node --dns-result-order=ipv4first -r tsx/cjs --test tests/data_persistence_across_restarts.test.ts"
   },
   "dependencies": {

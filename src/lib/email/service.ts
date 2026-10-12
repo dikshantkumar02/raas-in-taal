@@ -27,6 +27,7 @@ async function sendViaGmail(
   gmailPass: string,
   order: Order,
   emailHtml: string,
+  qrBuffer: Buffer | null,
   qrImageUrl: string
 ): Promise<{ success: boolean; status: 'SENT' | 'FAILED'; provider: string; error?: string }> {
   try {
@@ -37,19 +38,30 @@ async function sendViaGmail(
         user: gmailUser,
         pass: gmailPass,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
     });
+
+    const attachments: any[] = [];
+    if (qrBuffer) {
+      attachments.push({
+        filename: `gate-pass-${order.orderReference}.png`,
+        content: qrBuffer,
+        cid: 'ticket_qr',
+      });
+    } else if (qrImageUrl) {
+      attachments.push({
+        filename: `gate-pass-${order.orderReference}.png`,
+        path: qrImageUrl,
+      });
+    }
 
     await transporter.sendMail({
       from: `"Raas in Taal — Dandiya Night" <${gmailUser}>`,
       to: order.customerEmail,
       subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
       html: emailHtml,
-      attachments: [
-        {
-          filename: `gate-pass-${order.orderReference}.png`,
-          path: qrImageUrl,
-        },
-      ],
+      attachments,
     });
 
     emailDeliveryLog.set(order.id, {
@@ -57,19 +69,19 @@ async function sendViaGmail(
       recipientEmail: order.customerEmail,
       sentAt: new Date(),
       status: 'SENT',
-      provider: 'gmail_fallback',
+      provider: 'gmail_smtp',
     });
-    return { success: true, status: 'SENT', provider: 'gmail_fallback' };
+    return { success: true, status: 'SENT', provider: 'gmail_smtp' };
   } catch (err: any) {
     emailDeliveryLog.set(order.id, {
       orderId: order.id,
       recipientEmail: order.customerEmail,
       sentAt: new Date(),
       status: 'FAILED',
-      provider: 'gmail_fallback',
+      provider: 'gmail_smtp',
       error: err.message,
     });
-    return { success: false, status: 'FAILED', provider: 'gmail_fallback', error: err.message };
+    return { success: false, status: 'FAILED', provider: 'gmail_smtp', error: err.message };
   }
 }
 
@@ -86,12 +98,37 @@ export async function sendTicketConfirmationEmail(params: {
   const { order, pass, event, appBaseUrl } = params;
   const passUrl = `${appBaseUrl}/ticket/${encodeURIComponent(pass.qrToken)}`;
 
-  // Generate high-reliability HTTPS QR Image URL (loads in all email clients without Gmail base64 blocking)
+  // Generate crisp QR code buffer offline using installed qrcode dependency
+  let qrBuffer: Buffer | null = null;
+  try {
+    const QRCode = (await import('qrcode')).default || (await import('qrcode'));
+    qrBuffer = await QRCode.toBuffer(pass.qrToken, {
+      errorCorrectionLevel: 'H',
+      margin: 2,
+      width: 300,
+      color: {
+        dark: '#1A0307',
+        light: '#FFFFFF',
+      },
+    });
+  } catch (err: any) {
+    console.warn('[Email] Note on local QR buffer:', err.message);
+  }
+
+  // Backup HTTPS QR URL
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=8&color=1A0307&bgcolor=FFFFFF&data=${encodeURIComponent(pass.qrToken)}`;
 
   const safeCustomerName = escapeHtml(order.customerName);
   const safeOrderReference = escapeHtml(order.orderReference);
   const safeVenue = escapeHtml(event.venue);
+
+  const attendeesHtml = (order.attendeeDetails && order.attendeeDetails.length > 0)
+    ? `<p style="margin: 6px 0;"><strong>Admitted Guest(s):</strong> ${order.attendeeDetails.map(a => escapeHtml(a.name)).filter(Boolean).join(', ')}</p>`
+    : '';
+
+  const amountPaidDisplay = order.amountPaise
+    ? `₹${(order.amountPaise / 100).toLocaleString('en-IN')}`
+    : 'Confirmed';
 
   const emailHtml = `
     <!DOCTYPE html>
@@ -117,24 +154,26 @@ export async function sendTicketConfirmationEmail(params: {
           <p class="subtitle">Organized by Chaos and Chill</p>
         </div>
         <p>Namaste <strong>${safeCustomerName}</strong>,</p>
-        <p>Your booking for Jaipur's most vibrant Dandiya night is confirmed!</p>
+        <p>Your booking for Jaipur's most vibrant Dandiya night is confirmed! Your official entry gate pass is below:</p>
         
         <div class="card">
-          <p><strong>Booking Ref:</strong> ${safeOrderReference}</p>
-          <p><strong>Ticket Category:</strong> ${order.categoryCode.toUpperCase()}</p>
-          <p><strong>Admitted Attendees:</strong> ${pass.totalAttendees} Person(s)</p>
-          <p><strong>Date:</strong> Sunday, 18 October 2026</p>
-          <p><strong>Durga Puja:</strong> 5:30 PM | <strong>Dandiya Night:</strong> 6:00 PM</p>
-          <p><strong>Venue:</strong> ${safeVenue}</p>
+          <p style="margin: 6px 0;"><strong>Booking Ref:</strong> ${safeOrderReference}</p>
+          <p style="margin: 6px 0;"><strong>Ticket Category:</strong> ${order.categoryCode.toUpperCase()}</p>
+          <p style="margin: 6px 0;"><strong>Admitted Attendees:</strong> ${pass.totalAttendees} Person(s)</p>
+          <p style="margin: 6px 0;"><strong>Payment Status:</strong> Paid (${amountPaidDisplay} via Razorpay)</p>
+          ${attendeesHtml}
+          <p style="margin: 6px 0;"><strong>Date:</strong> Sunday, 18 October 2026</p>
+          <p style="margin: 6px 0;"><strong>Durga Puja:</strong> 5:30 PM | <strong>Dandiya Night:</strong> 6:00 PM</p>
+          <p style="margin: 6px 0;"><strong>Venue:</strong> ${safeVenue}</p>
         </div>
 
         <!-- Official Entry Gate QR Scanner Pass -->
         <div style="text-align: center; margin: 24px 0; background: #1B0207; border: 2px dashed #E5A93C; border-radius: 12px; padding: 20px;">
           <p style="color: #E5A93C; font-size: 13px; font-weight: bold; letter-spacing: 1.5px; text-transform: uppercase; margin: 0 0 12px 0;">Official Entry Gate QR Scanner Pass</p>
           <div style="display: inline-block; background: #ffffff; padding: 12px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
-            <img src="${qrImageUrl}" alt="Gate Pass QR Code" width="220" height="220" style="display: block; width: 220px; height: 220px; margin: 0 auto; border: 0;" />
+            <img src="cid:ticket_qr" alt="Gate Pass QR Code" width="220" height="220" style="display: block; width: 220px; height: 220px; margin: 0 auto; border: 0;" />
           </div>
-          <p style="color: #FFA347; font-size: 11px; margin-top: 10px; font-family: monospace;">Pass Token: ${pass.qrToken.slice(0, 18)}...</p>
+          <p style="color: #FFA347; font-size: 11px; margin-top: 10px; font-family: monospace;">Pass Token: ${pass.bookingReference}</p>
           <p style="color: #FFF9F0; font-size: 12px; margin-top: 6px;">Present this QR code directly to the gate staff for entry.</p>
         </div>
 
@@ -143,8 +182,8 @@ export async function sendTicketConfirmationEmail(params: {
         </div>
 
         <div style="margin-top: 24px;">
-          <h4 style="color: #E5A93C;">Important Gate Rules:</h4>
-          <ul>
+          <h4 style="color: #E5A93C; margin-bottom: 8px;">Important Gate Rules:</h4>
+          <ul style="padding-left: 20px; margin-top: 4px; line-height: 1.6;">
             <li>This single pass admits <strong>${pass.totalAttendees} attendee(s)</strong> for your booking.</li>
             <li>Partial entry is permitted (group members arriving separately can be admitted progressively).</li>
             <li>Strictly non-transferable and one-time entry limit per attendee.</li>
@@ -163,10 +202,18 @@ export async function sendTicketConfirmationEmail(params: {
   const provider = (process.env.EMAIL_PROVIDER || 'mock').replace(/['"]/g, '').trim().toLowerCase();
   const gmailUser = (process.env.GMAIL_USER || '').replace(/['"]/g, '').trim();
   const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').replace(/['"]/g, '').replace(/\s+/g, '').trim();
+  const rawFrom = (process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev').replace(/['"]/g, '').trim();
 
-  // Explicit Gmail provider mode
-  if (provider === 'gmail' && gmailUser && gmailPass) {
-    return sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+  // If Resend is configured with default unverified onboarding domain, it will fail on all external recipients.
+  // In that case, prefer Gmail SMTP directly if configured so real buyers receive their pass immediately.
+  const isResendRestricted = rawFrom.includes('onboarding@resend.dev') && order.customerEmail.toLowerCase().trim() !== 'raasintaal@gmail.com';
+  const preferGmail = (provider === 'gmail' || isResendRestricted || !apiKey) && Boolean(gmailUser && gmailPass);
+
+  if (preferGmail) {
+    const gmailResult = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrBuffer, qrImageUrl);
+    if (gmailResult.success) {
+      return gmailResult;
+    }
   }
 
   // Mock / offline testing mode
@@ -186,15 +233,23 @@ export async function sendTicketConfirmationEmail(params: {
   if (apiKey) {
     try {
       const resend = new Resend(apiKey);
-      const rawFrom = (process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev').replace(/['"]/g, '').trim();
       const fromName = (process.env.EMAIL_FROM_NAME || 'Raas in Taal').replace(/['"]/g, '').trim();
       const formattedFrom = rawFrom.includes('<') ? rawFrom : `${fromName} <${rawFrom}>`;
+
+      const resendAttachments: any[] = [];
+      if (qrBuffer) {
+        resendAttachments.push({
+          filename: `gate-pass-${order.orderReference}.png`,
+          content: qrBuffer,
+        });
+      }
 
       const response = await resend.emails.send({
         from: formattedFrom,
         to: [order.customerEmail],
         subject: `Gate Pass Confirmed [${order.orderReference}] — Raas in Taal Dandiya Night`,
         html: emailHtml,
+        ...(resendAttachments.length > 0 ? { attachments: resendAttachments } : {}),
       });
 
       if (!response.error && response.data?.id) {
@@ -211,10 +266,10 @@ export async function sendTicketConfirmationEmail(params: {
 
       console.warn(`[Resend] Delivery warning for ${order.customerEmail}:`, response.error?.message);
 
-      // If Resend failed (e.g. unverified custom domain for external recipient) and Gmail fallback is available:
+      // If Resend failed (e.g. unverified domain or external recipient) and Gmail is available:
       if (gmailUser && gmailPass) {
         console.info(`[Email] Falling back to Gmail SMTP for ${order.customerEmail}`);
-        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrBuffer, qrImageUrl);
         if (fallbackRes.success) {
           return fallbackRes;
         }
@@ -234,7 +289,7 @@ export async function sendTicketConfirmationEmail(params: {
 
       if (gmailUser && gmailPass) {
         console.info(`[Email] Falling back to Gmail SMTP for ${order.customerEmail}`);
-        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+        const fallbackRes = await sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrBuffer, qrImageUrl);
         if (fallbackRes.success) {
           return fallbackRes;
         }
@@ -254,7 +309,7 @@ export async function sendTicketConfirmationEmail(params: {
 
   // Fallback if apiKey not set but Gmail is
   if (gmailUser && gmailPass) {
-    return sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrImageUrl);
+    return sendViaGmail(gmailUser, gmailPass, order, emailHtml, qrBuffer, qrImageUrl);
   }
 
   return { success: false, status: 'FAILED', error: 'No email service credentials configured' };

@@ -177,12 +177,16 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      sendTicketConfirmationEmail({
-        order: confirmation.order!,
-        pass: confirmation.pass,
-        event: db.getEventConfig(),
-        appBaseUrl: baseUrl,
-      }).catch(() => {});
+      try {
+        await sendTicketConfirmationEmail({
+          order: confirmation.order!,
+          pass: confirmation.pass,
+          event: db.getEventConfig(),
+          appBaseUrl: baseUrl,
+        });
+      } catch (emailErr: any) {
+        console.warn('[PaymentsVerify] Email dispatch error:', emailErr?.message || emailErr);
+      }
 
       return NextResponse.json({
         success: true,
@@ -218,12 +222,16 @@ export async function POST(req: NextRequest) {
               });
 
               if (confirmation.success && confirmation.pass) {
-                sendTicketConfirmationEmail({
-                  order: confirmation.order!,
-                  pass: confirmation.pass,
-                  event: db.getEventConfig(),
-                  appBaseUrl: baseUrl,
-                }).catch(() => {});
+                try {
+                  await sendTicketConfirmationEmail({
+                    order: confirmation.order!,
+                    pass: confirmation.pass,
+                    event: db.getEventConfig(),
+                    appBaseUrl: baseUrl,
+                  });
+                } catch (emailErr: any) {
+                  console.warn('[PaymentsReconcile] Email dispatch error:', emailErr?.message || emailErr);
+                }
 
                 return NextResponse.json({
                   success: true,
