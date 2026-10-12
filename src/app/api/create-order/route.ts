@@ -69,18 +69,56 @@ export async function POST(req: NextRequest) {
       groupFemaleVerified,
     } = body;
 
-    // Validate amount (in paise, minimum 100 paise = 1 INR)
-    const numericAmount = Number(amount);
-    if (amount === undefined || amount === null || isNaN(numericAmount) || numericAmount < 100) {
-      return NextResponse.json(
-        { error: 'Amount is required and must be at least 100 paise' },
-        { status: 400 }
-      );
-    }
-
     let bookingOrderReference: string | undefined = undefined;
     let reservationOrderId: string | undefined = undefined;
     let serverAuthoritativeAmountPaise: number | undefined = undefined;
+
+    const existingRef = body.orderReference ? String(body.orderReference).trim().toUpperCase() : undefined;
+    if (existingRef && !categoryCode) {
+      const order = await db.getOrderByReferenceAsync(existingRef);
+      if (!order) {
+        return NextResponse.json({ error: 'Booking reservation not found' }, { status: 404 });
+      }
+
+      const cleanCustomerEmail = customer.email.trim().toLowerCase();
+      if (
+        order.customerEmail.toLowerCase() !== cleanCustomerEmail &&
+        (!order.customerId || order.customerId !== customer.id)
+      ) {
+        return NextResponse.json(
+          { error: 'Unauthorized: This booking belongs to another customer account.' },
+          { status: 403 }
+        );
+      }
+
+      if (order.paymentStatus === 'SUCCESS') {
+        return NextResponse.json({
+          alreadyPaid: true,
+          orderReference: order.orderReference,
+          message: 'This booking has already been paid and verified.',
+        });
+      }
+
+      if (order.paymentStatus === 'REFUNDED') {
+        return NextResponse.json(
+          { error: `Booking cannot be paid because status is ${order.paymentStatus}` },
+          { status: 400 }
+        );
+      }
+
+      bookingOrderReference = order.orderReference;
+      reservationOrderId = order.id;
+      serverAuthoritativeAmountPaise = order.amountPaise;
+    } else {
+      // Validate amount (in paise, minimum 100 paise = 1 INR)
+      const numericAmount = Number(amount);
+      if (amount === undefined || amount === null || isNaN(numericAmount) || numericAmount < 100) {
+        return NextResponse.json(
+          { error: 'Amount is required and must be at least 100 paise' },
+          { status: 400 }
+        );
+      }
+    }
 
     // If checkout attendee / category information is provided, create reservation in database
     if (categoryCode) {

@@ -107,12 +107,12 @@ export const api = {
 
   // Payment Verification
   payments: {
-    verify: (orderReference: string, simulateSuccess = false) =>
+    verify: (orderReference: string) =>
       request<{ success: boolean; paymentStatus: string; passQrToken?: string; orderReference: string }>(
         '/api/payments/verify',
         {
           method: 'POST',
-          body: JSON.stringify({ orderReference, simulateSuccess }),
+          body: JSON.stringify({ orderReference }),
         }
       ),
   },
