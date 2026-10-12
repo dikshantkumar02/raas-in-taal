@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
 
     clearFailedAttempts(adminLockoutKey);
 
+    await db.ensureInitialized(true);
+
     const capacity = await db.getCapacityStatus();
     const event = db.getEventConfig();
     const categories = db.getTicketCategories();

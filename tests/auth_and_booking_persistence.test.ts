@@ -384,4 +384,31 @@ describe('Mandatory Signup/Login, Booking History Persistence & Secure OTP Recov
     const data = await res.json();
     assert.match(data.error, /between 6 and 128 characters/i);
   });
+
+  test('14. Deleted customer immediately invalidates session and returns 401', async () => {
+    const reg = await db.registerCustomer({
+      name: 'Temp User',
+      email: 'temp_deleted@example.com',
+      phone: '9876543322',
+      password: 'Password123!',
+    });
+    assert.equal(reg.success, true);
+
+    const token = createSessionToken('temp_deleted@example.com');
+    const authReq = new NextRequest('http://localhost:3000/api/auth/me', {
+      method: 'GET',
+      headers: { cookie: `customer_session=${token}` },
+    });
+
+    const activeRes = await authMeHandler(authReq);
+    assert.equal(activeRes.status, 200);
+
+    // Simulate customer deletion from database
+    db.reset();
+
+    const deletedRes = await authMeHandler(authReq);
+    assert.equal(deletedRes.status, 401);
+    const data = await deletedRes.json();
+    assert.equal(data.authenticated, false);
+  });
 });

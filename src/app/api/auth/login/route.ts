@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     await db.ensureInitialized();
-    const verification = db.verifyCustomer(normEmail, password);
+    const verification = await db.verifyCustomerAsync(normEmail, password);
     if (!verification.success || !verification.customer) {
       recordFailedAttempt(lockoutKey, 5, 10 * 60 * 1000);
       return NextResponse.json(

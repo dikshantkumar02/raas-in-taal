@@ -111,6 +111,8 @@ class EventStore {
   private lockPromise: Promise<void> = Promise.resolve();
   private initPromise: Promise<void> | null = null;
   private isInitialized = false;
+  private lastSyncTime: number = 0;
+  private readonly SYNC_TTL_MS: number = 10000; // 10 seconds auto-refresh from Supabase
 
   constructor() {
     this.loadFromDisk();
@@ -120,16 +122,18 @@ class EventStore {
     }
   }
 
-  public async ensureInitialized(): Promise<void> {
+  public async ensureInitialized(force = false): Promise<void> {
     if (!supabaseAdmin) {
       this.isInitialized = true;
       return;
     }
-    if (this.isInitialized) return;
-    if (!this.initPromise) {
-      this.initPromise = this.syncFromSupabase();
+    const now = Date.now();
+    if (!force && this.isInitialized && now - this.lastSyncTime < this.SYNC_TTL_MS) {
+      return;
     }
+    this.initPromise = this.syncFromSupabase();
     await this.initPromise;
+    this.lastSyncTime = Date.now();
     this.isInitialized = true;
   }
 
@@ -145,6 +149,8 @@ class EventStore {
       ]);
 
       if (ordersRes.data) {
+        this.orders.clear();
+        this.ordersByReference.clear();
         for (const row of ordersRes.data) {
           const ord: Order = {
             id: row.id,
@@ -174,6 +180,9 @@ class EventStore {
       }
 
       if (passesRes.data) {
+        this.passes.clear();
+        this.passesByOrderId.clear();
+        this.passesByTokenHash.clear();
         for (const row of passesRes.data) {
           const p: GatePass = {
             id: row.id,
@@ -195,6 +204,7 @@ class EventStore {
       }
 
       if (checkInsRes.data) {
+        this.checkIns = [];
         for (const row of checkInsRes.data) {
           this.checkIns.push({
             id: row.id,
@@ -210,6 +220,7 @@ class EventStore {
       }
 
       if (customersRes.data) {
+        this.customers.clear();
         for (const row of customersRes.data) {
           this.customers.set(row.email.toLowerCase().trim(), {
             id: row.id,
@@ -222,7 +233,9 @@ class EventStore {
         }
       }
 
-      if (staffRes.data) {
+      if (staffRes.data && staffRes.data.length > 0) {
+        this.staffAccounts.clear();
+        this.staffByUsername.clear();
         for (const row of staffRes.data) {
           this.staffAccounts.set(row.id, {
             id: row.id,
@@ -252,6 +265,9 @@ class EventStore {
       } catch (catErr) {
         // Non-fatal
       }
+
+      // Sync disk cache so local files reflect Supabase deletions immediately
+      this.saveToDisk();
     } catch (err) {
       // Non-fatal: memory cache keeps running safely
       console.warn('[Supabase Sync Notice]', err);
@@ -1244,12 +1260,19 @@ class EventStore {
   public async getCustomerByEmailAsync(email: string): Promise<Omit<Customer, 'passwordHash'> | undefined> {
     await this.ensureInitialized();
     const cleanEmail = email.trim().toLowerCase();
-    let customer = this.customers.get(cleanEmail);
-    if (!customer && supabaseAdmin) {
+
+    if (supabaseAdmin) {
       try {
-        const { data } = await supabaseAdmin.from('customers').select('*').eq('email', cleanEmail).maybeSingle();
-        if (data) {
-          customer = {
+        const { data, error } = await supabaseAdmin.from('customers').select('*').eq('email', cleanEmail).maybeSingle();
+        if (error) {
+          console.warn('[Supabase Customer Lookup Warning]', error);
+        } else if (!data) {
+          // Explicitly deleted in Supabase: remove from memory and disk cache
+          this.customers.delete(cleanEmail);
+          this.saveToDisk();
+          return undefined;
+        } else {
+          const customer: Customer = {
             id: data.id,
             email: data.email,
             name: data.name,
@@ -1258,14 +1281,52 @@ class EventStore {
             createdAt: new Date(data.created_at),
           };
           this.customers.set(cleanEmail, customer);
+          const { passwordHash: _, ...safe } = customer;
+          return safe;
         }
       } catch (err) {
-        console.warn('[Supabase Customer Lookup Warning]', err);
+        console.warn('[Supabase Customer Lookup Exception]', err);
       }
     }
+
+    const customer = this.customers.get(cleanEmail);
     if (!customer) return undefined;
     const { passwordHash: _, ...safe } = customer;
     return safe;
+  }
+
+  public async verifyCustomerAsync(email: string, password: string): Promise<{ success: boolean; customer?: Omit<Customer, 'passwordHash'>; error?: string }> {
+    await this.ensureInitialized();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin.from('customers').select('*').eq('email', cleanEmail).maybeSingle();
+        if (error || !data) {
+          this.customers.delete(cleanEmail);
+          this.saveToDisk();
+          return { success: false, error: 'No account found with this email. Please sign up.' };
+        }
+        const customer: Customer = {
+          id: data.id,
+          email: data.email,
+          name: data.name,
+          phone: data.phone,
+          passwordHash: data.password_hash,
+          createdAt: new Date(data.created_at),
+        };
+        this.customers.set(cleanEmail, customer);
+        if (!verifyPassword(password, customer.passwordHash)) {
+          return { success: false, error: 'Incorrect password.' };
+        }
+        const { passwordHash: _, ...safe } = customer;
+        return { success: true, customer: safe };
+      } catch (err) {
+        console.warn('[Supabase Customer Verify Exception]', err);
+      }
+    }
+
+    return this.verifyCustomer(email, password);
   }
 
   public getCustomerBookings(emailOrId: string) {
@@ -1290,6 +1351,60 @@ class EventStore {
 
   public async getCustomerBookingsAsync(emailOrId: string) {
     await this.ensureInitialized();
+    const clean = emailOrId.trim().toLowerCase();
+
+    if (supabaseAdmin) {
+      try {
+        const { data: dbOrders, error } = await supabaseAdmin
+          .from('orders')
+          .select('*')
+          .or(`customer_email.ilike.${clean},customer_id.eq.${clean}`)
+          .order('created_at', { ascending: false });
+
+        if (!error && dbOrders) {
+          const results: Array<Order & { passQrToken?: string }> = [];
+          for (const row of dbOrders) {
+            const ord: Order = {
+              id: row.id,
+              orderReference: row.order_reference,
+              categoryCode: row.category_code,
+              quantity: row.quantity,
+              totalAttendees: row.total_attendees,
+              amountPaise: row.amount_paise,
+              currency: row.currency || 'INR',
+              customerName: row.customer_name,
+              customerEmail: row.customer_email,
+              customerPhone: row.customer_phone,
+              customerId: row.customer_id || undefined,
+              attendeeDetails: row.attendee_details || [],
+              groupFemaleVerified: Boolean(row.group_female_verified),
+              paymentStatus: row.payment_status,
+              razorpayOrderId: row.razorpay_order_id || row.phonepe_provider_reference || undefined,
+              razorpayPaymentId: row.razorpay_payment_id || row.phonepe_transaction_id || undefined,
+              reservationExpiresAt: new Date(row.reservation_expires_at),
+              createdAt: new Date(row.created_at),
+              updatedAt: new Date(row.updated_at),
+              paidAt: row.paid_at ? new Date(row.paid_at) : undefined,
+            };
+
+            let passQrToken: string | undefined = undefined;
+            if (ord.paymentStatus === 'SUCCESS') {
+              const pass = await this.getPassByOrderIdAsync(ord.id);
+              passQrToken = pass?.qrToken;
+            }
+
+            results.push({
+              ...ord,
+              passQrToken,
+            });
+          }
+          return results;
+        }
+      } catch (err) {
+        console.warn('[Supabase Bookings Lookup Exception]', err);
+      }
+    }
+
     return this.getCustomerBookings(emailOrId);
   }
 

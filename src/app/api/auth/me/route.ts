@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
     await db.ensureInitialized();
     const customer = await db.getCustomerByEmailAsync(email);
     if (!customer) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
+      const res = NextResponse.json({ authenticated: false }, { status: 401 });
+      res.cookies.delete('customer_session');
+      return res;
     }
 
     await db.linkCustomerBookings(customer.id, customer.email);
