@@ -237,6 +237,21 @@ class EventStore {
           this.staffByUsername.set(row.username.toLowerCase(), row.id);
         }
       }
+
+      // Ensure ticket_categories exists in Supabase so foreign keys never fail
+      try {
+        const catCheck = await supabaseAdmin.from('ticket_categories').select('code').limit(1);
+        if (!catCheck.data || catCheck.data.length === 0) {
+          await supabaseAdmin.from('ticket_categories').upsert([
+            { code: 'stag_girls', name: 'Stag Girls', price_paise: 24900, attendees_per_ticket: 1, description: 'Entry for 1 female attendee.', eligibility_rule: 'Strictly for female stags only.', display_order: 1, is_active: true },
+            { code: 'couple', name: 'Couple', price_paise: 44900, attendees_per_ticket: 2, description: 'Entry for 1 couple (2 attendees).', eligibility_rule: 'Valid for 1 couple (Male + Female).', display_order: 2, is_active: true },
+            { code: 'group', name: 'Group (4 People)', price_paise: 69900, attendees_per_ticket: 4, description: 'Entry for a squad of 4 people.', eligibility_rule: 'At least 1 female attendee is mandatory in the group.', display_order: 3, is_active: true },
+            { code: 'family', name: 'Family (4 Members)', price_paise: 69900, attendees_per_ticket: 4, description: 'Entry for family of 4 members.', eligibility_rule: 'Valid for family members of all age groups.', display_order: 4, is_active: true }
+          ], { onConflict: 'code' });
+        }
+      } catch (catErr) {
+        // Non-fatal
+      }
     } catch (err) {
       // Non-fatal: memory cache keeps running safely
       console.warn('[Supabase Sync Notice]', err);
@@ -1026,12 +1041,17 @@ class EventStore {
 
     if (supabaseAdmin) {
       try {
-        const clean = decodeURIComponent(reference || '').toUpperCase().trim();
-        const { data } = await supabaseAdmin
-          .from('orders')
-          .select('*')
-          .eq('order_reference', clean)
-          .maybeSingle();
+        const clean = decodeURIComponent(reference || '').trim();
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean);
+
+        let query = supabaseAdmin.from('orders').select('*');
+        if (isUuid) {
+          query = query.or(`order_reference.ilike.${clean},id.eq.${clean}`);
+        } else {
+          query = query.ilike('order_reference', clean);
+        }
+
+        const { data } = await query.maybeSingle();
 
         if (data) {
           const ord: Order = {
@@ -1045,9 +1065,12 @@ class EventStore {
             customerName: data.customer_name,
             customerEmail: data.customer_email,
             customerPhone: data.customer_phone,
+            customerId: data.customer_id || undefined,
             attendeeDetails: data.attendee_details || [],
             groupFemaleVerified: Boolean(data.group_female_verified),
             paymentStatus: data.payment_status,
+            razorpayOrderId: data.razorpay_order_id || data.phonepe_provider_reference || undefined,
+            razorpayPaymentId: data.razorpay_payment_id || data.phonepe_transaction_id || undefined,
             reservationExpiresAt: new Date(data.reservation_expires_at),
             createdAt: new Date(data.created_at),
             updatedAt: new Date(data.updated_at),

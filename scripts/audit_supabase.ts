@@ -42,18 +42,24 @@ async function inspectDetails() {
     }
   }
 
-  console.log('\n--- CHECKING ORDERS EXISTING COLUMNS ---');
-  // Try selecting just 1 row with *
-  const { data: orderSample, error: orderErr } = await adminClient
+  console.log('\n--- EXISTING TICKET CATEGORIES IN SUPABASE ---');
+  const { data: categories, error: catErr } = await adminClient.from('ticket_categories').select('*');
+  console.log(`Found ${categories?.length} categories:`, categories, catErr);
+
+  console.log('\n--- EXISTING ORDERS IN SUPABASE ---');
+  const { data: allOrders, error: orderErr } = await adminClient
     .from('orders')
-    .select('*')
-    .limit(1);
+    .select('id, order_reference, category_code, amount_paise, payment_status, customer_email, razorpay_order_id, created_at');
 
   if (orderErr) {
-    console.error('Error on select * from orders:', orderErr);
+    console.error('Error on select orders:', orderErr);
   } else {
-    console.log('Orders query success. (Table is empty, checking specific columns individually)');
+    console.log(`Found ${allOrders?.length} orders:`, allOrders);
   }
+
+  console.log('\n--- EXISTING PASSES IN SUPABASE ---');
+  const { data: allPasses } = await adminClient.from('passes').select('id, order_id, booking_reference, status');
+  console.log(`Found ${allPasses?.length} passes:`, allPasses);
 
   const columnsToCheck = [
     'id',

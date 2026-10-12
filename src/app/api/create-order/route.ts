@@ -72,43 +72,67 @@ export async function POST(req: NextRequest) {
     let bookingOrderReference: string | undefined = undefined;
     let reservationOrderId: string | undefined = undefined;
     let serverAuthoritativeAmountPaise: number | undefined = undefined;
+    let existingOrder: any = undefined;
 
-    const existingRef = body.orderReference ? String(body.orderReference).trim().toUpperCase() : undefined;
+    const existingRef = body.orderReference ? String(body.orderReference).trim() : undefined;
     if (existingRef && !categoryCode) {
-      const order = await db.getOrderByReferenceAsync(existingRef);
-      if (!order) {
+      existingOrder = await db.getOrderByReferenceAsync(existingRef);
+      if (!existingOrder) {
+        existingOrder = await db.getOrderByIdAsync(existingRef);
+      }
+      if (!existingOrder) {
         return NextResponse.json({ error: 'Booking reservation not found' }, { status: 404 });
       }
 
       const cleanCustomerEmail = customer.email.trim().toLowerCase();
-      if (
-        order.customerEmail.toLowerCase() !== cleanCustomerEmail &&
-        (!order.customerId || order.customerId !== customer.id)
-      ) {
+      const isOwner =
+        existingOrder.customerEmail.toLowerCase() === cleanCustomerEmail ||
+        (existingOrder.customerId && existingOrder.customerId === customer.id) ||
+        !existingOrder.customerId;
+
+      if (!isOwner) {
         return NextResponse.json(
           { error: 'Unauthorized: This booking belongs to another customer account.' },
           { status: 403 }
         );
       }
 
-      if (order.paymentStatus === 'SUCCESS') {
+      if (existingOrder.paymentStatus === 'SUCCESS') {
         return NextResponse.json({
           alreadyPaid: true,
-          orderReference: order.orderReference,
+          orderReference: existingOrder.orderReference,
           message: 'This booking has already been paid and verified.',
         });
       }
 
-      if (order.paymentStatus === 'REFUNDED') {
+      if (existingOrder.paymentStatus === 'REFUNDED') {
         return NextResponse.json(
-          { error: `Booking cannot be paid because status is ${order.paymentStatus}` },
+          { error: `Booking cannot be paid because status is ${existingOrder.paymentStatus}` },
           { status: 400 }
         );
       }
 
-      bookingOrderReference = order.orderReference;
-      reservationOrderId = order.id;
-      serverAuthoritativeAmountPaise = order.amountPaise;
+      // If this booking already has an active Razorpay order ID, return it immediately
+      if (existingOrder.razorpayOrderId) {
+        return NextResponse.json({
+          order_id: existingOrder.razorpayOrderId,
+          amount: existingOrder.amountPaise,
+          currency: existingOrder.currency || 'INR',
+          receipt: existingOrder.orderReference,
+          key_id: config.keyId,
+          orderReference: existingOrder.orderReference,
+          customerName: existingOrder.customerName,
+          customerEmail: existingOrder.customerEmail,
+          customerPhone: existingOrder.customerPhone,
+          categoryCode: existingOrder.categoryCode,
+          quantity: existingOrder.quantity,
+          totalAttendees: existingOrder.totalAttendees,
+        });
+      }
+
+      bookingOrderReference = existingOrder.orderReference;
+      reservationOrderId = existingOrder.id;
+      serverAuthoritativeAmountPaise = existingOrder.amountPaise;
     } else {
       // Validate amount (in paise, minimum 100 paise = 1 INR)
       const numericAmount = Number(amount);
@@ -206,7 +230,13 @@ export async function POST(req: NextRequest) {
         currency: razorpayOrder.currency,
         receipt: razorpayOrder.receipt,
         key_id: config.keyId,
-        ...(bookingOrderReference ? { orderReference: bookingOrderReference } : {}),
+        orderReference: bookingOrderReference || existingOrder?.orderReference,
+        customerName: existingOrder ? existingOrder.customerName : (customerName || customer.name),
+        customerEmail: existingOrder ? existingOrder.customerEmail : customer.email,
+        customerPhone: existingOrder ? existingOrder.customerPhone : (customerPhone || customer.phone),
+        categoryCode: existingOrder ? existingOrder.categoryCode : categoryCode,
+        quantity: existingOrder ? existingOrder.quantity : quantity,
+        totalAttendees: existingOrder ? existingOrder.totalAttendees : undefined,
       });
     } catch (razorpayErr: any) {
       // Handle authentication failures (401)

@@ -59,6 +59,7 @@ export default function BookingStatusPage({
 
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const [orderStatus, setOrderStatus] = useState<'PENDING' | 'SUCCESS' | 'FAILED' | 'RESERVED' | 'EXPIRED' | 'CANCELLED'>('PENDING');
   const [orderDetails, setOrderDetails] = useState<OrderDetails | null>(null);
   const [passData, setPassData] = useState<PassDetails | null>(null);
@@ -95,6 +96,16 @@ export default function BookingStatusPage({
 
       const data = await res.json();
 
+      if (!res.ok) {
+        if (res.status === 404 || data.error?.toLowerCase().includes('not found')) {
+          setNotFound(true);
+          return;
+        }
+        setErrorMessage(data.error || 'Failed to check booking status.');
+        return;
+      }
+
+      setNotFound(false);
       if (data.orderDetails) {
         setOrderDetails(data.orderDetails);
       }
@@ -385,6 +396,47 @@ export default function BookingStatusPage({
         <div className="p-12 text-center rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 space-y-4 shadow-xl">
           <Loader2 className="w-8 h-8 text-raas-gold animate-spin mx-auto" />
           <p className="text-sm text-raas-cream font-medium">Checking live payment status...</p>
+        </div>
+      ) : notFound ? (
+        <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/30 space-y-6 text-center shadow-xl">
+          <div className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-9 h-9" />
+          </div>
+
+          <div className="space-y-1.5">
+            <h2 className="text-2xl font-bold text-raas-cream">
+              Reservation Not Found or Expired
+            </h2>
+            <p className="text-xs text-raas-cream/70 max-w-md mx-auto">
+              We could not find an active reservation for reference <span className="font-mono text-raas-gold font-bold">{orderReference}</span>. Unpaid reservations expire automatically after 10 minutes.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
+            <Link
+              href="/checkout"
+              className="w-full sm:w-auto gold-gradient-btn px-6 py-3.5 rounded-xl text-xs font-extrabold shadow-lg flex items-center justify-center gap-2"
+            >
+              <span>Book Tickets Now</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+
+            <Link
+              href="/account"
+              className="w-full sm:w-auto px-5 py-3.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 hover:border-raas-gold text-xs font-bold text-raas-cream flex items-center justify-center gap-2 transition-colors"
+            >
+              <User className="w-4 h-4 text-raas-marigold" />
+              <span>My Bookings</span>
+            </Link>
+
+            <Link
+              href="/"
+              className="w-full sm:w-auto px-5 py-3.5 rounded-xl bg-raas-maroon-dark border border-raas-gold/30 hover:border-raas-gold text-xs font-bold text-raas-cream flex items-center justify-center gap-2 transition-colors"
+            >
+              <Home className="w-4 h-4 text-raas-cream/70" />
+              <span>Home</span>
+            </Link>
+          </div>
         </div>
       ) : orderStatus === 'SUCCESS' ? (
         <div className="p-8 sm:p-10 rounded-3xl bg-raas-maroon-mid border border-raas-gold/40 space-y-6 text-center shadow-2xl">
